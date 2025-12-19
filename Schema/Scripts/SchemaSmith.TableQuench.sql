@@ -14,7 +14,7 @@ BEGIN TRY
   DECLARE @v_SQL NVARCHAR(MAX) = '',
           @v_DatabaseCollation NVARCHAR(200) = CAST(DATABASEPROPERTYEX(DB_NAME(), 'COLLATION') AS NVARCHAR(200))
   SET NOCOUNT ON
-  RAISERROR('Parse Tables from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Tables from Xml（解析表）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#TableDefinitions') IS NOT NULL DROP TABLE #TableDefinitions
   SELECT [Schema] = SchemaSmith.fn_SafeBracketWrap(ISNULL(TableNode.value('(Schema/text())[1]', 'NVARCHAR(500)'), 'dbo')),
          [Name] = SchemaSmith.fn_SafeBracketWrap(TableNode.value('(Name/text())[1]', 'NVARCHAR(500)')),
@@ -37,7 +37,7 @@ BEGIN TRY
     INTO #Tables
     FROM #TableDefinitions WITH (NOLOCK)
   
-  RAISERROR('Parse Columns from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Columns from Xml（解析列）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#Columns') IS NOT NULL DROP TABLE #Columns
   SELECT t.[Schema], t.[Name] AS [TableName], [ColumnName] = SchemaSmith.fn_SafeBracketWrap(c.[ColumnName]), [DataType] = REPLACE(c.[DataType], 'ROWVERSION', 'TIMESTAMP'), 
          [Nullable] = ISNULL(c.[Nullable], 0), c.[Default], c.[CheckExpression], c.[ComputedExpression], [Persisted] = ISNULL(c.[Persisted], 0),
@@ -47,9 +47,9 @@ BEGIN TRY
                             AND COLUMNPROPERTY(OBJECT_ID(t.[Schema] + '.' + t.[Name], 'U'), SchemaSmith.fn_StripBracketWrapping([ColumnName]), 'ColumnId') IS NULL
                            THEN 1 ELSE 0 END) AS NewColumn,
          SchemaSmith.fn_SafeBracketWrap(c.[ColumnName]) + ' ' +
-         -- For computed columns only the expression is needed
+         -- 对于计算列，仅需表达式
          CASE WHEN RTRIM(ISNULL([ComputedExpression], '')) <> '' THEN 'AS (' + ComputedExpression + ')' + CASE WHEN ISNULL(c.[Persisted], 0) = 1 THEN ' PERSISTED' ELSE '' END
-              -- Otherwise build the column definition
+              -- 否则构建列定义
               ELSE UPPER(REPLACE(c.[DataType], 'ROWVERSION', 'TIMESTAMP')) + CASE WHEN ISNULL(Nullable, 0) = 1 THEN ' NULL' ELSE ' NOT NULL' END +
                    CASE WHEN RTRIM(ISNULL([Default], '')) <> '' THEN ' DEFAULT ' + [Default] ELSE '' END
               END AS [ColumnScript]
@@ -68,13 +68,13 @@ BEGIN TRY
                         [DataMaskFunction] = ColumnNode.value('(DataMaskFunction/text())[1]', 'NVARCHAR(500)'),
                         [OldName] = ColumnNode.value('(OldName/text())[1]', 'NVARCHAR(500)')) c;
 
-  -- Don't try to apply tables without columns
+  -- 不要尝试应用没有列的表
   DELETE FROM #Tables
     WHERE NOT EXISTS (SELECT * FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = #Tables.[Schema] AND C.[TableName] = #Tables.[Name])
   DELETE FROM #TableDefinitions
     WHERE NOT EXISTS (SELECT * FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = #TableDefinitions.[Schema] AND C.[TableName] = #TableDefinitions.[Name])
   
-  RAISERROR('Parse Indexes from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Indexes from Xml（解析索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#Indexes') IS NOT NULL DROP TABLE #Indexes
   SELECT t.[Schema], t.[Name] AS [TableName], [IndexName] = SchemaSmith.fn_SafeBracketWrap(i.[IndexName]), [CompressionType] = ISNULL(NULLIF(RTRIM(i.[CompressionType]), ''), 'NONE'), 
          [PrimaryKey] = ISNULL(i.[PrimaryKey], 0), [Unique] = COALESCE(NULLIF(i.[Unique], 0), NULLIF(i.[PrimaryKey], 0), i.[UniqueConstraint], 0),
@@ -107,7 +107,7 @@ BEGIN TRY
                         [IndexColumns] = IndexNode.value('(IndexColumns/text())[1]', 'NVARCHAR(MAX)'),
                         [IncludeColumns] = IndexNode.value('(IncludeColumns/text())[1]', 'NVARCHAR(MAX)')) i;
   
-  RAISERROR('Parse XML Indexes from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse XML Indexes from Xml（解析 XML 索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#XmlIndexes') IS NOT NULL DROP TABLE #XmlIndexes
   SELECT t.[Schema], t.[Name] AS [TableName], [IndexName] = SchemaSmith.fn_SafeBracketWrap(i.[IndexName]), i.[IsPrimary],
          [Column] = SchemaSmith.fn_SafeBracketWrap(i.[Column]), [PrimaryIndex] = SchemaSmith.fn_SafeBracketWrap(i.[PrimaryIndex]),
@@ -121,7 +121,7 @@ BEGIN TRY
                         [PrimaryIndex] = IndexNode.value('(PrimaryIndex/text())[1]', 'NVARCHAR(500)'),
                         [SecondaryIndexType] = IndexNode.value('(SecondaryIndexType/text())[1]', 'NVARCHAR(500)')) i;
 
-  RAISERROR('Parse Foreign Keys from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Foreign Keys from Xml（解析外键）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ForeignKeys') IS NOT NULL DROP TABLE #ForeignKeys
   SELECT t.[Schema], t.[Name] AS [TableName], [KeyName] = SchemaSmith.fn_SafeBracketWrap(f.[KeyName]), 
          [RelatedTableSchema] = SchemaSmith.fn_SafeBracketWrap(ISNULL(f.[RelatedTableSchema], 'dbo')), [RelatedTable] = SchemaSmith.fn_SafeBracketWrap(f.[RelatedTable]), 
@@ -146,7 +146,7 @@ BEGIN TRY
                         [DeleteAction] = FkNode.value('(DeleteAction/text())[1]', 'NVARCHAR(20)'),
                         [UpdateAction] = FkNode.value('(UpdateAction/text())[1]', 'NVARCHAR(20)')) f;
   
-  RAISERROR('Parse Table Level Check Constraints from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Table Level Check Constraints from Xml（解析表级检查约束）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#CheckConstraints') IS NOT NULL DROP TABLE #CheckConstraints
   SELECT t.[Schema], t.[Name] AS [TableName], c.[ConstraintName], c.[Expression]
     INTO #CheckConstraints
@@ -155,7 +155,7 @@ BEGIN TRY
     CROSS APPLY (SELECT [ConstraintName] = CheckNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
                         [Expression] = CheckNode.value('(Expression/text())[1]', 'NVARCHAR(MAX)')) c;
   
-  RAISERROR('Parse Statistics from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Statistics from Xml（解析统计信息）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#Statistics') IS NOT NULL DROP TABLE #Statistics
   SELECT t.[Schema], t.[Name] AS [TableName], [StatisticName] = SchemaSmith.fn_SafeBracketWrap(s.[StatisticName]), [SampleSize] = ISNULL(s.[SampleSize], 0), s.[FilterExpression],
          [Columns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
@@ -170,7 +170,7 @@ BEGIN TRY
                         [FilterExpression] = StatNode.value('(FilterExpression/text())[1]', 'NVARCHAR(MAX)'),
                         [Columns] = StatNode.value('(Columns/text())[1]', 'NVARCHAR(MAX)')) s;
   
-  RAISERROR('Parse Full Text Indexes from Xml', 10, 1) WITH NOWAIT
+  RAISERROR('Parse Full Text Indexes from Xml（解析全文索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#FullTextIndexes') IS NOT NULL DROP TABLE #FullTextIndexes
   SELECT t.[Schema], t.[Name] AS [TableName], [FullTextCatalog] = SchemaSmith.fn_SafeBracketWrap(f.[FullTextCatalog]), [KeyIndex] = SchemaSmith.fn_SafeBracketWrap(f.[KeyIndex]), 
          f.[ChangeTracking], [StopList] = SchemaSmith.fn_SafeBracketWrap(COALESCE(NULLIF(RTRIM(f.[StopList]), ''), 'SYSTEM')),
@@ -187,8 +187,8 @@ BEGIN TRY
                         [ChangeTracking] = FullTextNode.value('(ChangeTracking/text())[1]', 'NVARCHAR(500)'),
                         [StopList] = FullTextNode.value('(StopList/text())[1]', 'NVARCHAR(500)')) f;
   
-  -- Clustered index compression overrides the table compression
-  RAISERROR('Override table compression to match clustered index', 10, 1) WITH NOWAIT
+  -- 聚集索引压缩会覆盖表压缩
+  RAISERROR('Override table compression to match clustered index（根据聚集索引覆盖表压缩）', 10, 1) WITH NOWAIT
   UPDATE t
     SET [CompressionType] = CASE WHEN [ColumnStore] = 1 THEN 'COLUMNSTORE' ELSE i.[CompressionType] END
     FROM #Tables t
@@ -196,13 +196,13 @@ BEGIN TRY
                                  AND i.[TableName] = t.[Name]
                                  AND i.[Clustered] = 1
  
-  RAISERROR('Get Schema List', 10, 1) WITH NOWAIT
+  RAISERROR('Get Schema List（获取架构列表）', 10, 1) WITH NOWAIT
   SELECT DISTINCT t.[Schema]
     INTO #SchemaList
     FROM #Tables t WITH (NOLOCK)
 
-  RAISERROR('Handle Table Renames', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + T.[Schema] + '.' + T.[OldName] + ' to ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Handle Table Renames（处理表重命名）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + T.[Schema] + '.' + T.[OldName] + ' to ' + T.[Schema] + '.' + T.[Name] + '（重命名）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(T.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(T.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(T.[Name]) + ''';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX))
                             FROM #Tables T WITH (NOLOCK)
                             WHERE OBJECT_ID(T.[Schema] + '.' + T.[OldName]) IS NOT NULL
@@ -210,8 +210,8 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Handle Column Renames', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[OldName] + ' to ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Handle Column Renames（处理列重命名）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[OldName] + ' to ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + '（重命名）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(c.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[TableName]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(c.[ColumnName]) + ''', ''COLUMN'';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX))
                             FROM #Columns c WITH (NOLOCK)
                             WHERE COLUMNPROPERTY(OBJECT_ID(c.[Schema] + '.' + c.[TableName]), c.[OldName], 'AllowsNull') IS NOT NULL
@@ -219,8 +219,8 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Turn off Temporal Tracking for tables no longer defined temporal', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Turn OFF Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Turn off Temporal Tracking for tables no longer defined temporal（关闭不再标记为时态的表的时态跟踪）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Turn OFF Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + '（关闭时态跟踪）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' SET (SYSTEM_VERSIONING = OFF);' + CHAR(13) + CHAR(10) +
                                                              'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' DROP PERIOD FOR SYSTEM_TIME;' AS NVARCHAR(MAX))
                             FROM #Tables T WITH (NOLOCK)
@@ -229,7 +229,7 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Collect table level extended properties', 10, 1) WITH NOWAIT
+  RAISERROR('Collect table level extended properties（收集表级扩展属性）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#TableProperties') IS NOT NULL DROP TABLE #TableProperties
   SELECT [Schema], objname COLLATE DATABASE_DEFAULT AS TableName, x.[Name] COLLATE DATABASE_DEFAULT AS PropertyName, CONVERT(NVARCHAR(50), x.[value]) COLLATE DATABASE_DEFAULT AS [value]
     INTO #TableProperties
@@ -237,8 +237,8 @@ BEGIN TRY
     CROSS APPLY fn_listextendedproperty(default, 'Schema', SchemaSmith.fn_StripBracketWrapping([Schema]), 'Table', default, default, default) x
     WHERE x.[Name] COLLATE DATABASE_DEFAULT = 'ProductName'
   
-  RAISERROR('Validate Table Ownership', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Table ' + tp.[Schema] + '.' + tp.[TableName] + ' owned by different product. [' + tp.[Value] + ']'', 10, 1) WITH NOWAIT;' AS NVARCHAR(MAX))
+  RAISERROR('Validate Table Ownership（校验表所属产品）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Table ' + tp.[Schema] + '.' + tp.[TableName] + ' owned by different product. [' + tp.[Value] + ']（表归属不同产品）'', 10, 1) WITH NOWAIT;' AS NVARCHAR(MAX))
                             FROM #Tables t WITH (NOLOCK)
                             JOIN #TableProperties tp WITH (NOLOCK) ON t.[Schema] = tp.[Schema]
                                                                   AND SchemaSmith.fn_StripBracketWrapping(t.[Name]) = tp.TableName
@@ -252,12 +252,12 @@ BEGIN TRY
                                                      AND SchemaSmith.fn_StripBracketWrapping(t.[Name]) = tp.TableName
                WHERE tp.[value] <> @ProductName)
   BEGIN
-    RAISERROR('One or more tables in this quench are already owned by another product', 16, 1) WITH NOWAIT
+    RAISERROR('One or more tables in this quench are already owned by another product（有一个或多个表已被其他产品拥有）', 16, 1) WITH NOWAIT
   END
   
   IF @DropTablesRemovedFromProduct = 1
   BEGIN
-    RAISERROR('Identify tables removed from the product', 10, 1) WITH NOWAIT
+    RAISERROR('Identify tables removed from the product（识别已从产品中移除的表）', 10, 1) WITH NOWAIT
     IF OBJECT_ID('tempdb..#TablesRemovedFromProduct') IS NOT NULL DROP TABLE #TablesRemovedFromProduct
     SELECT tp.[Schema], tp.TableName
       INTO #TablesRemovedFromProduct
@@ -270,8 +270,8 @@ BEGIN TRY
 
     IF EXISTS (SELECT * FROM #TablesRemovedFromProduct WITH (NOLOCK))
     BEGIN
-      RAISERROR('Drop tables removed from the product', 10, 1) WITH NOWAIT
-      SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping table ' + t.[Schema] + '.' + t.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+      RAISERROR('Drop tables removed from the product（删除已从产品中移除的表）', 10, 1) WITH NOWAIT
+      SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping table ' + t.[Schema] + '.' + t.[TableName] + '（删除表）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                                  'IF OBJECT_ID(''' + t.[Schema] + '.[' + t.[TableName] + ']'', ''U'') IS NOT NULL DROP TABLE ' + t.[Schema] + '.[' + t.[TableName] + '];' AS NVARCHAR(MAX))
                                 FROM #TablesRemovedFromProduct t WITH (NOLOCK)
                                 FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
@@ -279,7 +279,7 @@ BEGIN TRY
     END
   END
   
-  RAISERROR('Collect index level extended properties', 10, 1) WITH NOWAIT
+  RAISERROR('Collect index level extended properties（收集索引级扩展属性）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexProperties') IS NOT NULL DROP TABLE #IndexProperties
   SELECT t.[Schema], t.[Name] AS TableName, objname COLLATE DATABASE_DEFAULT AS IndexName, x.[Name] COLLATE DATABASE_DEFAULT AS PropertyName, CONVERT(NVARCHAR(50), x.[value]) COLLATE DATABASE_DEFAULT AS [value]
     INTO #IndexProperties
@@ -287,7 +287,7 @@ BEGIN TRY
     CROSS APPLY fn_listextendedproperty(default, 'Schema', SchemaSmith.fn_StripBracketWrapping(t.[Schema]), 'Table', SchemaSmith.fn_StripBracketWrapping(t.[Name]), 'Index', default) x
     WHERE x.[Name] COLLATE DATABASE_DEFAULT = 'ProductName'
   
-  RAISERROR('Identify indexes removed from the product', 10, 1) WITH NOWAIT
+  RAISERROR('Identify indexes removed from the product（识别已从产品中移除的索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexesRemovedFromProduct') IS NOT NULL DROP TABLE #IndexesRemovedFromProduct
   SELECT xp.[Schema], xp.TableName, xp.IndexName, IsConstraint = CAST(CASE WHEN OBJECT_ID(xp.[Schema] + '.' + xp.IndexName) IS NOT NULL THEN 1 ELSE 0 END AS BIT)
     INTO #IndexesRemovedFromProduct
@@ -304,13 +304,13 @@ BEGIN TRY
                           AND i.TableName = xp.TableName
                           AND SchemaSmith.fn_StripBracketWrapping(i.IndexName) = xp.IndexName)
 
-  RAISERROR('Detect Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Column Changes（检测列变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ColumnChanges') IS NOT NULL DROP TABLE #ColumnChanges
   SELECT c.[Schema], c.[TableName], c.[ColumnName],
-         -- For computed columns, only the expression is needed
+         -- 对于计算列，仅需表达式
          CASE WHEN RTRIM(ISNULL([ComputedExpression], '')) <> '' 
               THEN 'AS (' + ComputedExpression + ')' + CASE WHEN c.[Persisted] = 1 THEN ' PERSISTED' ELSE '' END
-              -- Otherwise we need to build the column definition
+              -- 否则需要构建列定义
               ELSE REPLACE(REPLACE(UPPER(LEFT([DataType], COALESCE(NULLIF(CHARINDEX('IDENTITY', [DataType]), 0), LEN([DataType]) + 1) - 1)), 'ROWGUIDCOL', ''), 'NOT FOR REPLICATION', '') + 
                    CASE WHEN [Collation] <> 'IGNORE' AND ISNULL(NULLIF(ic.COLLATION_NAME, @v_DatabaseCollation), '') <> [Collation] THEN ' COLLATE ' + ISNULL(NULLIF(RTRIM([Collation]), ''), @v_DatabaseCollation) ELSE '' END +
                    CASE WHEN [Sparse] = 1 THEN ' SPARSE' ELSE '' END +
@@ -329,7 +329,7 @@ BEGIN TRY
               ELSE ''
               END AS [SpecialColumnScript],
          CAST(CASE WHEN cc.[definition] IS NOT NULL OR RTRIM(ISNULL([ComputedExpression], '')) <> ''
-                     OR (ident.column_id IS NULL AND [DataType] LIKE '%IDENTITY%') -- switching to identity... requires drop and recreate column
+                     OR (ident.column_id IS NULL AND [DataType] LIKE '%IDENTITY%') -- 切换为标识列需要删除并重建列
                    THEN 1 ELSE 0 END AS BIT) AS MustDropAndRecreate,
          CAST(0 AS BIT) AS DropOnly
     INTO #ColumnChanges
@@ -373,7 +373,7 @@ BEGIN TRY
         OR ISNULL(mc.masking_function, '') COLLATE DATABASE_DEFAULT <> [DataMaskFunction]
         OR ([Collation] <> 'IGNORE' AND ISNULL(NULLIF(ic.COLLATION_NAME, @v_DatabaseCollation), '') <> [Collation])
   
-  RAISERROR('Detect Computed Columns Impacted by Other Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Computed Columns Impacted by Other Column Changes（检测受其他列变更影响的计算列）', 10, 1) WITH NOWAIT
   INSERT #ColumnChanges ([Schema], [TableName], [ColumnName], [ColumnScript], [SpecialColumnScript], MustDropAndRecreate, [DropOnly])
     SELECT C.[Schema], C.[TableName], c.[ColumnName], 
            [ColumnScript] = 'AS (' + ComputedExpression + ')' + CASE WHEN c.[Persisted] = 1 THEN ' PERSISTED' ELSE '' END, 
@@ -387,7 +387,7 @@ BEGIN TRY
                                    AND c.[ColumnName] = cc.[ColumnName]
       WHERE NOT EXISTS (SELECT * FROM #ColumnChanges cc2 WITH (NOLOCK) WHERE cc2.[Schema] = cc.[Schema] AND cc2.[TableName] = cc.[TableName] AND cc2.[ColumnName] = cc.[ColumnName])
   
-  RAISERROR('Detect Column Drops', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Column Drops（检测列删除）', 10, 1) WITH NOWAIT
   INSERT #ColumnChanges ([Schema], [TableName], [ColumnName], [ColumnScript], [SpecialColumnScript], MustDropAndRecreate, [DropOnly])
     SELECT t.[Schema], [TableName] = t.[Name], [ColumnName] = '[' + COLUMN_NAME + ']', '', '', 0, 1
       FROM #Tables t WITH (NOLOCK)
@@ -400,7 +400,7 @@ BEGIN TRY
                             AND SchemaSmith.fn_StripBracketWrapping(c.[ColumnName]) = COLUMN_NAME)
         AND NOT (t.IsTemporal = 1 AND COLUMN_NAME IN ('ValidFrom', 'ValidTo'))
   
-  RAISERROR('Collect Foreign Keys To Drop', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Foreign Keys To Drop（收集待删除外键）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#FKsToDrop') IS NOT NULL DROP TABLE #FKsToDrop
   SELECT t.[Schema], [TableName] = t.[Name], [FKName] = fk.[Name]
     INTO #FKsToDrop
@@ -408,15 +408,15 @@ BEGIN TRY
     JOIN sys.foreign_keys fk WITH (NOLOCK) ON fk.parent_object_id = OBJECT_ID(t.[Schema] + '.' + t.[Name])
     WHERE NOT EXISTS (SELECT * FROM #ForeignKeys fk2 WITH (NOLOCK) WHERE t.[Schema] = fk2.[Schema] AND t.[Name] = fk2.[TableName] AND fk.[name] = SchemaSmith.fn_StripBracketWrapping(fk2.[KeyName]))
 
-  RAISERROR('Drop Foreign Keys No Longer Defined In The Product', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Foreign Keys No Longer Defined In The Product（删除产品中已移除的外键）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + '（删除外键）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'IF EXISTS (SELECT * FROM sys.foreign_keys WHERE [name] = ''' + SchemaSmith.fn_StripBracketWrapping(df.[FKName]) + ''' AND parent_object_id = OBJECT_ID(''' + df.[Schema] + '.' + df.[TableName] + ''')) ' +
                                                              'ALTER TABLE ' + df.[Schema] + '.' + df.[TableName] + ' DROP CONSTRAINT ' + df.[FKName] + ';' AS NVARCHAR(MAX))
                             FROM #FKsToDrop df WITH (NOLOCK)
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Identify Fulltext Indexes To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Fulltext Indexes To Drop Based On Column Changes（根据列变更识别待删除全文索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#FTIndexesToDropForChanges') IS NOT NULL DROP TABLE #FTIndexesToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName]
     INTO #FTIndexesToDropForChanges
@@ -424,15 +424,15 @@ BEGIN TRY
     JOIN #ColumnChanges cc WITH (NOLOCK) ON ic.[object_id] = OBJECT_ID(cc.[Schema] + '.' + cc.[TableName]) 
                                         AND COL_NAME(ic.[object_id], ic.column_id) = SchemaSmith.fn_StripBracketWrapping(cc.ColumnName)
   
-  RAISERROR('Drop FullText Indexes Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping fulltext index on ' + di.[Schema] + '.' + di.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop FullText Indexes Referencing Modified Columns（删除引用已修改列的全文索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping fulltext index on ' + di.[Schema] + '.' + di.[TableName] + '（删除全文索引）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'DROP FULLTEXT INDEX ON ' + di.[Schema] + '.' + di.[TableName] + ';' AS NVARCHAR(MAX))
                             FROM #FTIndexesToDropForChanges di WITH (NOLOCK)
                             JOIN sys.fulltext_indexes fi WITH (NOLOCK) ON fi.[object_id] = OBJECT_ID(di.[Schema] + '.' + di.[TableName])
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Collect Existing FullText Indexes', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing FullText Indexes（收集现有全文索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingFullTextIndexes') IS NOT NULL DROP TABLE #ExistingFullTextIndexes
   SELECT t.[Schema], [TableName] = t.[Name],
          STUFF((SELECT ',' + CAST('[' + COL_NAME(fc.[object_id], fc.column_id) + ']' AS NVARCHAR(MAX))
@@ -449,7 +449,7 @@ BEGIN TRY
     JOIN sys.fulltext_indexes fi WITH (NOLOCK) ON fi.[object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
     WHERE t.NewTable = 0
   
-  RAISERROR('Identify Indexes To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Indexes To Drop Based On Column Changes（根据列变更识别待删除索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexesToDropForColumnChanges') IS NOT NULL DROP TABLE #IndexesToDropForColumnChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], IndexName = i.[name],
          IsConstraint = CAST(CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN 1 ELSE 0 END AS BIT),
@@ -464,9 +464,9 @@ BEGIN TRY
     WHERE ic.column_id IS NOT NULL
        OR i.filter_definition LIKE '%' + SchemaSmith.fn_StripBracketWrapping(cc.ColumnName) + '%'
   
-  -- Handle table compression changes
-  RAISERROR('Fixup Table Compression', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering table compression for ' + t.[Schema] + '.' + t.[Name] + ' TO ' + t.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  -- 处理表压缩变更
+  RAISERROR('Fixup Table Compression（修正表压缩）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering table compression for ' + t.[Schema] + '.' + t.[Name] + ' TO ' + t.[CompressionType] + '（调整表压缩）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'ALTER TABLE ' + t.[Schema] + '.' + t.[Name] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + t.[CompressionType] + ');' AS NVARCHAR(MAX))
                             FROM #Tables t WITH (NOLOCK)
                             LEFT JOIN sys.partitions p WITH (NOLOCK) ON p.[object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
@@ -477,9 +477,9 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  -- Handle index compression changes
-  RAISERROR('Fixup Index Compression', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering index compression for ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ' TO ' + i.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  -- 处理索引压缩变更
+  RAISERROR('Fixup Index Compression（修正索引压缩）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering index compression for ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ' TO ' + i.[CompressionType] + '（调整索引压缩）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'ALTER INDEX ' + i.[IndexName] + ' ON ' + i.[Schema] + '.' + i.[TableName] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + i.[CompressionType] + ');' AS NVARCHAR(MAX))
                             FROM #Indexes i WITH (NOLOCK) 
                             JOIN sys.indexes si WITH (NOLOCK) ON si.[object_id] = OBJECT_ID(i.[Schema] + '.' + i.[TableName])
@@ -490,7 +490,7 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Collect Existing Index Definitions', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing Index Definitions（收集现有索引定义）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingIndexes') IS NOT NULL DROP TABLE #ExistingIndexes
   SELECT xSchema = t.[Schema], [xTableName] = t.[Name], [xIndexName] = CAST(si.[Name] AS NVARCHAR(500)),
          IsConstraint = CAST(CASE WHEN si.is_primary_key = 1 OR si.is_unique_constraint = 1 THEN 1 ELSE 0 END AS BIT),
@@ -537,7 +537,7 @@ BEGIN TRY
     WHERE t.NewTable = 0
       AND NOT EXISTS (SELECT * FROM sys.xml_indexes xi WHERE xi.[object_id] = si.[object_id] AND xi.index_id = si.index_id)
     
-  RAISERROR('Detect Index Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Index Changes（检测索引变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexChanges') IS NOT NULL DROP TABLE #IndexChanges
   SELECT i.[Schema], i.[TableName], i.[IndexName], ei.[IsConstraint], IsUnique = i.[Unique], IsClustered = i.[Clustered]
     INTO #IndexChanges
@@ -563,7 +563,7 @@ BEGIN TRY
                                  THEN ' WITH (DATA_COMPRESSION=' + RTRIM(ISNULL(i.[CompressionType], '')) + ')'
                                  ELSE '' END
 
-  RAISERROR('Detect Index Renames', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Index Renames（检测索引重命名）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexRenames') IS NOT NULL DROP TABLE #IndexRenames
   SELECT i.[Schema], i.[TableName], [NewName] = i.[IndexName], ei.[IsConstraint], IsUnique = i.[Unique], [OldName] = ei.[xIndexName]
     INTO #IndexRenames
@@ -591,15 +591,15 @@ BEGIN TRY
                                                                        THEN ' WITH (DATA_COMPRESSION=' + RTRIM(ISNULL(i.[CompressionType], '')) + ')'
                                                                        ELSE '' END
 
-  -- Remove duplicates from the rename list
+  -- 从重命名列表中移除重复项
   SELECT MAX([NewName]) AS ValidNewName, [OldName] AS [OriginalName]
     INTO #IndexRenameDedupe
     FROM #IndexRenames ir WITH (NOLOCK)
     GROUP BY [OldName]  
   DELETE FROM #IndexRenames WHERE EXISTS (SELECT * FROM #IndexRenameDedupe dd WITH (NOLOCK) WHERE [OriginalName] = [OldName] AND [ValidNewName] <> [NewName])
   
-  RAISERROR('Handle Renamed Indexes And Unique Constraints', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Handle Renamed Indexes And Unique Constraints（处理重命名的索引和唯一约束）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + '（重命名）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              CASE WHEN IsConstraint = 1
                                                                   THEN CASE WHEN OBJECT_ID(ir.[Schema] + '.' + ir.[NewName]) IS NULL
                                                                             THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''OBJECT'';'
@@ -616,7 +616,7 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Collect Existing XML Index Definitions', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing XML Index Definitions（收集现有 XML 索引定义）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingXmlIndexes') IS NOT NULL DROP TABLE #ExistingXmlIndexes
   SELECT xSchema = t.[Schema], [xTableName] = t.[Name], [xIndexName] = CAST(i.[Name] COLLATE DATABASE_DEFAULT AS NVARCHAR(500)),
          IndexScript = 'CREATE ' + CASE WHEN i.xml_index_type = 0 THEN 'PRIMARY ' ELSE '' END + 
@@ -632,7 +632,7 @@ BEGIN TRY
     JOIN sys.index_columns ic ON i.[object_id] = ic.[object_id] AND i.index_id = ic.index_id
     WHERE t.NewTable = 0
 
-  RAISERROR('Detect Xml Index Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Xml Index Changes（检测 XML 索引变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#XmlIndexChanges') IS NOT NULL DROP TABLE #XmlIndexChanges
   SELECT i.[Schema], i.[TableName], i.[IndexName]
     INTO #XmlIndexChanges
@@ -650,7 +650,7 @@ BEGIN TRY
                                  THEN ' USING XML INDEX ' + i.PrimaryIndex + ' FOR ' + i.SecondaryIndexType
                                  ELSE '' END
   
-  RAISERROR('Detect Xml Index Renames', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Xml Index Renames（检测 XML 索引重命名）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#XmlIndexRenames') IS NOT NULL DROP TABLE #XmlIndexRenames
   SELECT i.[Schema], i.[TableName], [NewName] = i.[IndexName], [OldName] = ei.[xIndexName]
     INTO #XmlIndexRenames
@@ -670,8 +670,8 @@ BEGIN TRY
                                                                        THEN ' USING XML INDEX ' + i.PrimaryIndex + ' FOR ' + i.SecondaryIndexType
                                                                        ELSE '' END
 
-  RAISERROR('Handle Renamed Xml Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Handle Renamed Xml Indexes（处理重命名的 XML 索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + '（重命名）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              CASE WHEN INDEXPROPERTY(OBJECT_ID(ir.[Schema] + '.' + ir.[TableName]), SchemaSmith.fn_StripBracketWrapping(ir.[NewName]), 'IndexID') IS NULL
                                                                   THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(ir.[TableName]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''INDEX'';'
                                                                   ELSE 'IF EXISTS (SELECT * FROM sys.indexes WHERE [name] = ''' + SchemaSmith.fn_StripBracketWrapping(ir.[OldName]) + ''' AND [object_id] = OBJECT_ID(''' + ir.[Schema] + '.' + ir.[TableName] + ''')) ' +
@@ -681,7 +681,7 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Identify unknown and modified indexes to drop', 10, 1) WITH NOWAIT
+  RAISERROR('Identify unknown and modified indexes to drop（识别需要删除的未知或已修改索引）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#IndexesToDrop') IS NOT NULL DROP TABLE #IndexesToDrop
   SELECT [Schema] = CAST([Schema] AS NVARCHAR(500)), [TableName] = CAST([TableName] AS NVARCHAR(500)), 
          [IndexName] = CAST(SchemaSmith.fn_StripBracketWrapping([IndexName]) AS NVARCHAR(500)), [IsConstraint], [IsUnique] = i.[is_unique], 
@@ -709,15 +709,15 @@ BEGIN TRY
   SELECT [Schema], [TableName], SchemaSmith.fn_StripBracketWrapping([IndexName]), [IsConstraint] = 0, [IsUnique] = 0, [IsClustered] = 0
     FROM #XmlIndexChanges WITH (NOLOCK)
   
-  -- Need to drop all the XML indexes if we're removing the clustered PK
+  -- 如果删除聚集主键，需要删除所有 XML 索引
   INSERT #IndexesToDrop ([Schema], [TableName], [IndexName], [IsConstraint], [IsUnique], [IsClustered])
     SELECT [xSchema], [xTableName], [xIndexName], [IsConstraint] = 0, [IsUnique] = 0, [IsClustered] = 0
       FROM #ExistingXmlIndexes ei WITH (NOLOCK)
       WHERE EXISTS (SELECT * FROM #IndexesToDrop id WITH (NOLOCK) WHERE [xSchema] = [Schema] AND [xTableName] = [TableName] AND id.[IsClustered] = 1)
         AND NOT EXISTS (SELECT * FROM #IndexesToDrop id WITH (NOLOCK) WHERE [xSchema] = [Schema] AND [xTableName] = [TableName] AND [xIndexName] = [IndexName])
 
-  RAISERROR('Drop Referencing Foreign Keys When Dropping Unique Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) + '.' + fk.[name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Referencing Foreign Keys When Dropping Unique Indexes（在删除唯一索引时删除引用外键）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) + '.' + fk.[name] + '（删除外键）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                                              'IF EXISTS (SELECT * FROM sys.foreign_keys WHERE [name] = ''' + fk.[name] + ''' AND parent_object_id = ' + CONVERT(VARCHAR(20), fk.parent_object_id) + ') ' +
                                                              'ALTER TABLE [' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] DROP CONSTRAINT [' + fk.[name] + '];' AS NVARCHAR(MAX))
                             FROM #IndexesToDrop di WITH (NOLOCK)
@@ -726,8 +726,8 @@ BEGIN TRY
                             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Drop FullText Indexes Referencing Unique Indexes That Will Be Dropped', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping fulltext index on ' + ef.[Schema] + '.' + ef.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop FullText Indexes Referencing Unique Indexes That Will Be Dropped（删除引用将被删除的唯一索引的全文索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping fulltext index on ' + ef.[Schema] + '.' + ef.[TableName] + '（删除全文索引）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'DROP FULLTEXT INDEX ON ' + ef.[Schema] + '.' + ef.[TableName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #IndexesToDrop id WITH (NOLOCK)
     JOIN #ExistingFullTextIndexes ef WITH (NOLOCK) ON id.[Schema] = ef.[Schema]
@@ -736,8 +736,8 @@ BEGIN TRY
     JOIN sys.fulltext_indexes fi WITH (NOLOCK) ON fi.[object_id] = OBJECT_ID(ef.[Schema] + '.' + ef.[TableName])
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Drop Unknown and Modified Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping ' + CASE WHEN IsConstraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + di.[Schema] + '.' + di.[TableName] + '.' + di.[IndexName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Unknown and Modified Indexes（删除未知和已修改的索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping ' + CASE WHEN IsConstraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + di.[Schema] + '.' + di.[TableName] + '.' + di.[IndexName] + '（删除）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   CASE WHEN IsConstraint = 1
                                        THEN 'ALTER TABLE ' + di.[Schema] + '.' + di.[TableName] + ' DROP CONSTRAINT IF EXISTS [' + di.[IndexName] + '];'
                                        ELSE 'DROP INDEX IF EXISTS [' + di.[IndexName] + '] ON ' + di.[Schema] + '.' + di.[TableName] + ';'
@@ -747,8 +747,8 @@ BEGIN TRY
 
   IF @UpdateFillFactor = 1
   BEGIN
-    RAISERROR('Fixup Modified Fillfactors', 10, 1) WITH NOWAIT
-    SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Fixup ' + CASE WHEN IsConstraint = 1 THEN 'constraint' ELSE 'index' END + ' fillfactor in ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ''', 10, 1) WITH NOWAIT; ' + 
+    RAISERROR('Fixup Modified Fillfactors（修正已修改的填充因子）', 10, 1) WITH NOWAIT
+    SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Fixup ' + CASE WHEN IsConstraint = 1 THEN 'constraint' ELSE 'index' END + ' fillfactor in ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + '（修正填充因子）'', 10, 1) WITH NOWAIT; ' + 
                                     'ALTER INDEX ' + i.[IndexName] + ' ON ' + i.[Schema] + '.' + i.[TableName] + ' REBUILD WITH (FILLFACTOR = ' + CONVERT(NVARCHAR(5), i.[FillFactor]) + ', SORT_IN_TEMPDB = ON);' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
       FROM #ExistingIndexes ei WITH (NOLOCK)
       JOIN #Indexes i WITH (NOLOCK) ON ei.[xSchema] = i.[Schema]
@@ -759,7 +759,7 @@ BEGIN TRY
     IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   END
   
-  RAISERROR('Identify Statistics To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Statistics To Drop Based On Column Changes（根据列变更识别待删除统计信息）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#StatisticsToDropForChanges') IS NOT NULL DROP TABLE #StatisticsToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], [StatName] = i.[name]
     INTO #StatisticsToDropForChanges
@@ -771,13 +771,13 @@ BEGIN TRY
     WHERE ic.column_id IS NOT NULL
        OR i.filter_definition LIKE '%' + SchemaSmith.fn_StripBracketWrapping(cc.ColumnName) + '%'
   
-  RAISERROR('Drop Statistics Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping statistic ' + id.[Schema] + '.' + id.[TableName] + '.[' + [StatName] + ']'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Statistics Referencing Modified Columns（删除引用已修改列的统计信息）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping statistic ' + id.[Schema] + '.' + id.[TableName] + '.[' + [StatName] + ']（删除统计信息）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'DROP STATISTICS ' + id.[Schema] + '.' + id.[TableName] + '.[' + [StatName] + '];' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #StatisticsToDropForChanges id WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Identify Foreign Keys To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Foreign Keys To Drop Based On Column Changes（根据列变更识别待删除外键）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#FKsToDropForChanges') IS NOT NULL DROP TABLE #FKsToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], FKName = fk.[name]
     INTO #FKsToDropForChanges
@@ -788,13 +788,13 @@ BEGIN TRY
                                          OR (OBJECT_ID(cc.[Schema] + '.' + cc.[TableName]) = fk.referenced_object_id
                                          AND SchemaSmith.fn_StripBracketWrapping(cc.ColumnName) = COL_NAME(fc.[referenced_object_id], fc.referenced_column_id))
   
-  RAISERROR('Drop Foreign Keys Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Foreign Keys Referencing Modified Columns（删除引用已修改列的外键）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + '（删除外键）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + df.[Schema] + '.' + df.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + df.[FKName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #FKsToDropForChanges df WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Identify Defaults To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Defaults To Drop Based On Column Changes（根据列变更识别待删除默认值）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#DefaultsToDropForChanges') IS NOT NULL DROP TABLE #DefaultsToDropForChanges
   SELECT cc.[Schema], cc.[TableName], DefaultName = dc.[name]
     INTO #DefaultsToDropForChanges
@@ -802,13 +802,13 @@ BEGIN TRY
     JOIN #ColumnChanges cc WITH (NOLOCK) ON dc.[parent_object_id] = OBJECT_ID(cc.[Schema] + '.' + cc.[TableName]) 
                                         AND COL_NAME(dc.parent_object_id, dc.parent_column_id) = SchemaSmith.fn_StripBracketWrapping(cc.ColumnName)
   
-  RAISERROR('Drop Defaults Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping default ' + dd.[Schema] + '.' + dd.[TableName] + '.' + dd.[DefaultName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Defaults Referencing Modified Columns（删除引用已修改列的默认值）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping default ' + dd.[Schema] + '.' + dd.[TableName] + '.' + dd.[DefaultName] + '（删除默认值）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + dd.[Schema] + '.' + dd.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + dd.[DefaultName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #DefaultsToDropForChanges dd WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Identify Check Constraints To Drop Based On Column Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Check Constraints To Drop Based On Column Changes（根据列变更识别待删除检查约束）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ChecksToDropForChanges') IS NOT NULL DROP TABLE #ChecksToDropForChanges
   SELECT cc.[Schema], cc.[TableName], CheckName = ck.[name]
     INTO #ChecksToDropForChanges
@@ -817,14 +817,14 @@ BEGIN TRY
                                         AND ((ck.parent_column_id <> 0 AND COL_NAME(ck.parent_object_id, ck.parent_column_id) = SchemaSmith.fn_StripBracketWrapping(cc.ColumnName))
                                           OR (ck.parent_column_id = 0 AND ck.[definition] LIKE '%' + SchemaSmith.fn_StripBracketWrapping(cc.ColumnName) + '%'))
   
-  RAISERROR('Drop Check Constraints Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping check constraint ' + fc.[Schema] + '.' + fc.[TableName] + '.' + fc.CheckName + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Check Constraints Referencing Modified Columns（删除引用已修改列的检查约束）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping check constraint ' + fc.[Schema] + '.' + fc.[TableName] + '.' + fc.CheckName + '（删除检查约束）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + fc.[Schema] + '.' + fc.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + fc.CheckName + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #ChecksToDropForChanges fc WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Drop Modified Computed Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping columns from ' + T.[Schema] + '.' + T.[Name] + ' (' + MessageColumns + ')'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified Computed Columns（删除已修改的计算列）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping columns from ' + T.[Schema] + '.' + T.[Name] + ' (' + MessageColumns + ')（删除列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' DROP ' + ScriptColumns + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM (SELECT T.[Schema], T.[Name], 
                  ScriptColumns = (SELECT STRING_AGG(CAST('COLUMN ' + [ColumnName] AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY cc.[ColumnName]) FROM #ColumnChanges cc WITH (NOLOCK) WHERE cc.[Schema] = T.[Schema] AND cc.[TableName] = T.[Name] AND cc.MustDropAndRecreate = 1),
@@ -834,8 +834,8 @@ BEGIN TRY
               AND EXISTS (SELECT * FROM #ColumnChanges cc WITH (NOLOCK) WHERE cc.[Schema] = T.[Schema] AND cc.[TableName] = T.[Name] AND cc.MustDropAndRecreate = 1)) T
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Drop Columns No Longer Part of The Product Definition', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping columns from ' + T.[Schema] + '.' + T.[Name] + ' (' + MessageColumns + ')'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Columns No Longer Part of The Product Definition（删除不再属于产品定义的列）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping columns from ' + T.[Schema] + '.' + T.[Name] + ' (' + MessageColumns + ')（删除列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' DROP ' + ScriptColumns + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM (SELECT T.[Schema], T.[Name],
                  ScriptColumns = (SELECT STRING_AGG(CAST('COLUMN ' + [ColumnName] AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY [ColumnName]) FROM #ColumnChanges cc WITH (NOLOCK) WHERE cc.[Schema] = T.[Schema] AND cc.[TableName] = T.[Name] AND cc.DropOnly = 1),
@@ -850,8 +850,8 @@ BEGIN TRY
     FROM #Columns c
     WHERE EXISTS (SELECT * FROM #ColumnChanges cc WITH (NOLOCK) WHERE cc.[Schema] = c.[Schema] AND cc.[TableName] = c.[TableName] and cc.ColumnName = c.ColumnName AND cc.MustDropAndRecreate = 1)
   
-  RAISERROR('Add New Tables', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding new table ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add New Tables（新增表）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding new table ' + T.[Schema] + '.' + T.[Name] + '（新增表）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'CREATE TABLE ' + T.[Schema] + '.' + T.[Name] + ' (' + ScriptColumns + ')' + 
                                   CASE WHEN ISNULL(t.[CompressionType], 'NONE') IN ('NONE', 'ROW', 'PAGE') THEN ' WITH (DATA_COMPRESSION=' + ISNULL(t.[CompressionType], 'NONE') + ')' ELSE '' END + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM (SELECT T.[Schema], T.[Name], t.[CompressionType],
@@ -861,17 +861,17 @@ BEGIN TRY
               AND EXISTS (SELECT * FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = T.[Schema] AND C.[TableName] = T.[Name])) T
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add missing ProductName extended property to tables', 10, 1) WITH NOWAIT
+  RAISERROR('Add missing ProductName extended property to tables（为表补充 ProductName 扩展属性）', 10, 1) WITH NOWAIT
   SELECT @v_SQL = STRING_AGG(CAST('EXEC sp_addextendedproperty @name = N''ProductName'', @value = ''' + @ProductName + ''', ' +
                                                               '@level0type = N''Schema'', @level0name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Schema]) + ''', ' +
                                                               '@level1type = N''Table'', @level1name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Name]) + ''';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #Tables t WITH (NOLOCK)
     WHERE NOT EXISTS (SELECT * FROM #TableProperties tp WITH (NOLOCK) WHERE t.[Schema] = tp.[Schema] AND SchemaSmith.fn_StripBracketWrapping(t.[Name]) = tp.TableName AND tp.PropertyName = 'ProductName')
-      AND OBJECT_ID(t.[Schema] + '.' + t.[Name]) IS NOT NULL  -- and the table physically exists
+      AND OBJECT_ID(t.[Schema] + '.' + t.[Name]) IS NOT NULL  -- 且表实际存在
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Add New Physical Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding ' + CAST(ColumnCount AS VARCHAR(20)) + ' new columns to ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add New Physical Columns（新增物理列）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding ' + CAST(ColumnCount AS VARCHAR(20)) + ' new columns to ' + T.[Schema] + '.' + T.[Name] + '（新增列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' ADD ' + ColumnScripts + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM (SELECT T.[Schema], T.[Name],
                  ColumnScripts = (SELECT STRING_AGG(CAST([ColumnScript] AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY c.[ColumnName]) FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = T.[Schema] AND C.[TableName] = T.[Name] AND c.NewColumn = 1 AND RTRIM(ISNULL([ComputedExpression], '')) = ''),
@@ -881,7 +881,7 @@ BEGIN TRY
               AND EXISTS (SELECT * FROM #Columns c WHERE C.[Schema] = T.[Schema] AND C.[TableName] = T.[Name] AND c.NewColumn = 1 AND RTRIM(ISNULL([ComputedExpression], '')) = '')) T
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Detect Default Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Default Changes（检测默认值变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#DefaultChanges') IS NOT NULL DROP TABLE #DefaultChanges
   SELECT C.[Schema], C.[TableName], C.[ColumnName],
          [DefaultName] = (SELECT [Name] 
@@ -899,13 +899,13 @@ BEGIN TRY
     WHERE t.NewTable = 0
       AND SchemaSmith.fn_StripParenWrapping(ic.COLUMN_DEFAULT) <> ISNULL(c.[Default], 'NULL')
   
-  RAISERROR('Drop Modified Defaults', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping default ' + dc.[Schema] + '.' + dc.[TableName] + '.' + dc.[DefaultName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified Defaults（删除已修改默认值）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping default ' + dc.[Schema] + '.' + dc.[TableName] + '.' + dc.[DefaultName] + '（删除默认值）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + dc.[Schema] + '.' + dc.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + dc.[DefaultName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #DefaultChanges dc WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Collect Existing Foreign Keys', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing Foreign Keys（收集现有外键）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingFKs') IS NOT NULL DROP TABLE #ExistingFKs
   SELECT t.[Schema], [TableName] = t.[Name],
          FKName = fk.[Name],
@@ -923,7 +923,7 @@ BEGIN TRY
     JOIN sys.foreign_keys fk WITH (NOLOCK) ON fk.parent_object_id = OBJECT_ID(t.[Schema] + '.' + t.[Name]) 
     WHERE t.NewTable = 0
 
-  RAISERROR('Detect Foreign Key Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Foreign Key Changes（检测外键变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#FKChanges') IS NOT NULL DROP TABLE #FKChanges
   SELECT ek.[Schema], ek.[TableName], ek.[FKName]
     INTO #FKChanges
@@ -935,13 +935,13 @@ BEGIN TRY
                          ' ON DELETE ' + [DeleteAction] +
                          ' ON UPDATE ' + [UpdateAction]
   
-  RAISERROR('Drop Modified Foreign Keys', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping Foreign Key ' + fc.[Schema] + '.' + fc.[TableName] + '.' + fc.[FKName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified Foreign Keys（删除已修改外键）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping Foreign Key ' + fc.[Schema] + '.' + fc.[TableName] + '.' + fc.[FKName] + '（删除外键）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + fc.[Schema] + '.' + fc.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + fc.[FKName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #FKChanges fc WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Collect Existing Statistics Definitions', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing Statistics Definitions（收集现有统计信息定义）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingStats') IS NOT NULL DROP TABLE #ExistingStats
   SELECT t.[Schema], [TableName] = t.[Name], [StatsName] = si.[Name],
          StatisticScript = 'CREATE STATISTICS ' +
@@ -960,7 +960,7 @@ BEGIN TRY
                                    AND si.[Name] NOT LIKE 'hind[_]%'
     WHERE t.NewTable = 0
   
-  RAISERROR('Detect Statistics Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Statistics Changes（检测统计信息变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#StatsChanges') IS NOT NULL DROP TABLE #StatsChanges
   SELECT s.[Schema], s.[TableName], s.[StatisticName]
     INTO #StatsChanges
@@ -971,13 +971,13 @@ BEGIN TRY
     WHERE es.StatisticScript <> 'CREATE STATISTICS ' + s.[StatisticName] + ' ON ' + s.[Schema] + '.' + s.[TableName] + ' (' + s.[Columns] + ')' +
                                 CASE WHEN RTRIM(ISNULL(s.[FilterExpression], '')) <> '' THEN ' WHERE ' + s.[FilterExpression] ELSE '' END
 
-  RAISERROR('Drop Modified Statistics', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping statistics ' + sc.[Schema] + '.' + sc.[TableName] + '.' + sc.[StatisticName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified Statistics（删除已修改统计信息）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping statistics ' + sc.[Schema] + '.' + sc.[TableName] + '.' + sc.[StatisticName] + '（删除统计信息）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'DROP STATISTICS ' + sc.[Schema] + '.' + sc.[TableName] + '.' + sc.[StatisticName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #StatsChanges sc WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Collect Existing Check Constraints', 10, 1) WITH NOWAIT
+  RAISERROR('Collect Existing Check Constraints（收集现有检查约束）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#ExistingCheckConstraints') IS NOT NULL DROP TABLE #ExistingCheckConstraints
   SELECT t.[Schema], [TableName] = t.[Name], [CheckName] = ck.[name], 
          [CheckColumn] = CASE WHEN ck.parent_column_id <> 0 THEN COL_NAME(ck.parent_object_id, ck.parent_column_id) ELSE NULL END,
@@ -986,7 +986,7 @@ BEGIN TRY
     FROM #Tables t WITH (NOLOCK)
     JOIN sys.check_constraints ck WITH (NOLOCK) ON ck.[parent_object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
   
-  RAISERROR('Detect Column Level Check Constraint Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Column Level Check Constraint Changes（检测列级检查约束变更）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#CheckChanges') IS NOT NULL DROP TABLE #CheckChanges
   SELECT ec.[Schema], ec.[TableName], ec.[CheckName]
     INTO #CheckChanges
@@ -1002,7 +1002,7 @@ BEGIN TRY
                           AND ec.[TableName] = cc.[TableName]
                           AND ec.[CheckName] = SchemaSmith.fn_StripBracketWrapping(cc.[ConstraintName]))
 
-  RAISERROR('Detect Table Level Check Constraint Changes', 10, 1) WITH NOWAIT
+  RAISERROR('Detect Table Level Check Constraint Changes（检测表级检查约束变更）', 10, 1) WITH NOWAIT
   INSERT #CheckChanges ([Schema], [TableName], [CheckName])
     SELECT ec.[Schema], ec.[TableName], ec.[CheckName]
       FROM #ExistingCheckConstraints ec WITH (NOLOCK)
@@ -1011,14 +1011,14 @@ BEGIN TRY
                                              AND ec.[CheckName] = SchemaSmith.fn_StripBracketWrapping(cc.[ConstraintName])
       WHERE ec.[CheckDefinition] <> cc.[Expression]
   
-  RAISERROR('Drop Modified Check Constraints', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping check constraint ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[CheckName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified Check Constraints（删除已修改检查约束）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping check constraint ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[CheckName] + '（删除检查约束）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + cc.[Schema] + '.' + cc.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + cc.[CheckName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #CheckChanges cc WITH (NOLOCK)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Alter Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering Column ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Alter Modified Columns（修改已变更的列）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering Column ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[ColumnName] + '（修改列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + cc.[Schema] + '.' + cc.[TableName] + ' ALTER COLUMN ' + cc.[ColumnName] + ' ' + 
                                   CASE WHEN RTRIM([SpecialColumnScript]) <> '' THEN [SpecialColumnScript] ELSE [ColumnScript] END + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
         FROM #ColumnChanges cc WITH (NOLOCK)
@@ -1026,8 +1026,8 @@ BEGIN TRY
           AND [DropOnly] = 0
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add New Computed Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding ' + CAST(ColumnCount AS VARCHAR(20)) + ' new columns to ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add New Computed Columns（新增计算列）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding ' + CAST(ColumnCount AS VARCHAR(20)) + ' new columns to ' + T.[Schema] + '.' + T.[Name] + '（新增计算列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' ADD ' + ScriptColumns + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM (SELECT T.[Schema], T.[Name],
                  ScriptColumns = (SELECT STRING_AGG(CAST(c.[ColumnScript] AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY c.[ColumnName]) FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = T.[Schema] AND C.[TableName] = T.[Name] AND c.NewColumn = 1 AND RTRIM(ISNULL([ComputedExpression], '')) <> ''),
@@ -1037,7 +1037,7 @@ BEGIN TRY
               AND EXISTS (SELECT * FROM #Columns c WHERE C.[Schema] = T.[Schema] AND C.[TableName] = T.[Name] AND c.NewColumn = 1 AND RTRIM(ISNULL([ComputedExpression], '')) <> '')) T
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Identify Existing Clustered Index Conflicts', 10, 1) WITH NOWAIT
+  RAISERROR('Identify Existing Clustered Index Conflicts（识别现有聚集索引冲突）', 10, 1) WITH NOWAIT
   IF OBJECT_ID('tempdb..#MissingClusteredIndexTables') IS NOT NULL DROP TABLE #MissingClusteredIndexTables
   SELECT DISTINCT i.[Schema], i.[TableName]
     INTO #MissingClusteredIndexTables
@@ -1048,8 +1048,8 @@ BEGIN TRY
                         WHERE si.[object_id] = OBJECT_ID(i.[Schema] + '.' + i.[TableName]) 
                           AND si.[name] = SchemaSmith.fn_StripBracketWrapping(i.[IndexName]))
   
-  RAISERROR('Drop Conflicting Clustered Index', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping ' + CASE WHEN si.is_primary_key = 1 OR si.is_unique_constraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + mct.[Schema] + '.' + mct.[TableName] + '.' + si.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Conflicting Clustered Index（删除冲突的聚集索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping ' + CASE WHEN si.is_primary_key = 1 OR si.is_unique_constraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + mct.[Schema] + '.' + mct.[TableName] + '.' + si.[Name] + '（删除）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   CASE WHEN si.is_primary_key = 1 OR si.is_unique_constraint = 1
                                        THEN 'ALTER TABLE ' + mct.[Schema] + '.' + mct.[TableName] + ' DROP CONSTRAINT IF EXISTS [' + si.[Name] + '];'
                                        ELSE 'DROP INDEX IF EXISTS [' + si.[Name] + '] ON ' + mct.[Schema] + '.' + mct.[TableName] + ';'
@@ -1059,8 +1059,8 @@ BEGIN TRY
                                      AND si.[type] IN (1, 5)
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add Missing Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating ' + CASE WHEN i.PrimaryKey = 1 OR i.UniqueConstraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Indexes（补充缺失索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating ' + CASE WHEN i.PrimaryKey = 1 OR i.UniqueConstraint = 1 THEN 'constraint' ELSE 'index' END + ' ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + '（创建）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   CASE WHEN i.PrimaryKey = 1 OR i.UniqueConstraint = 1
                                        THEN 'ALTER TABLE ' + i.[Schema] + '.' + i.[TableName] + ' ADD CONSTRAINT ' + i.[IndexName] +
                                             CASE WHEN i.PrimaryKey = 1 THEN ' PRIMARY KEY ' WHEN i.UniqueConstraint = 1 THEN ' UNIQUE ' END +
@@ -1102,8 +1102,8 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
 
-  RAISERROR('Add Missing Xml Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating index ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Xml Indexes（补充缺失 XML 索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating index ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + '（创建索引）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'CREATE ' + CASE WHEN i.IsPrimary = 1 THEN 'PRIMARY ' ELSE '' END + 
                                   'XML INDEX ' + i.[IndexName] COLLATE DATABASE_DEFAULT + ' ON ' + i.[Schema] + '.' + i.[TableName] + ' (' + i.[Column] + ')' + 
                                   CASE WHEN i.IsPrimary = 0 THEN ' USING XML INDEX ' + i.PrimaryIndex + ' FOR ' + i.SecondaryIndexType ELSE '' END +
@@ -1115,8 +1115,8 @@ BEGIN TRY
                           AND si.[name] = SchemaSmith.fn_StripBracketWrapping(i.[IndexName]))    
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Turn on Temporal Tracking for tables defined as temporal', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Turn ON Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Turn on Temporal Tracking for tables defined as temporal（为时态表开启时态跟踪）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Turn ON Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + '（开启时态跟踪）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' ADD [ValidFrom] DATETIME2(7) GENERATED ALWAYS AS ROW START NOT NULL DEFAULT ''0001-01-01 00:00:00.0000000'', ' +
                                                                                       '[ValidTo] DATETIME2(7) GENERATED ALWAYS AS ROW END NOT NULL DEFAULT ''9999-12-31 23:59:59.9999999'', ' +
                                                                                       'PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo);' + CHAR(13) + CHAR(10) +
@@ -1126,7 +1126,7 @@ BEGIN TRY
       AND OBJECTPROPERTY(OBJECT_ID([Schema] + '.' + [Name]), 'TableTemporalType') = 0
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Add missing ProductName extended property to indexes', 10, 1) WITH NOWAIT
+  RAISERROR('Add missing ProductName extended property to indexes（为索引补充 ProductName 扩展属性）', 10, 1) WITH NOWAIT
   SELECT @v_SQL = STRING_AGG(CAST('EXEC sp_addextendedproperty @name = N''ProductName'', @value = ''' + @ProductName + ''', ' +
                                                               '@level0type = N''Schema'', @level0name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Schema]) + ''', ' +
                                                               '@level1type = N''Table'', @level1name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Name]) + ''', ' +
@@ -1137,7 +1137,7 @@ BEGIN TRY
       AND NOT EXISTS (SELECT * FROM #IndexProperties ip WITH (NOLOCK) WHERE i.[Schema] = ip.[Schema] AND i.TableName = ip.TableName AND SchemaSmith.fn_StripBracketWrapping(i.IndexName) = ip.IndexName AND ip.PropertyName = 'ProductName')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add missing ProductName extended property to xml indexes', 10, 1) WITH NOWAIT
+  RAISERROR('Add missing ProductName extended property to xml indexes（为 XML 索引补充 ProductName 扩展属性）', 10, 1) WITH NOWAIT
   SELECT @v_SQL = STRING_AGG(CAST('EXEC sp_addextendedproperty @name = N''ProductName'', @value = ''' + @ProductName + ''', ' +
                                                               '@level0type = N''Schema'', @level0name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Schema]) + ''', ' +
                                                               '@level1type = N''Table'', @level1name = ''' + SchemaSmith.fn_StripBracketWrapping(t.[Name]) + ''', ' +
@@ -1148,8 +1148,8 @@ BEGIN TRY
       AND NOT EXISTS (SELECT * FROM #IndexProperties ip WITH (NOLOCK) WHERE i.[Schema] = ip.[Schema] AND i.TableName = ip.TableName AND SchemaSmith.fn_StripBracketWrapping(i.IndexName) = ip.IndexName AND ip.PropertyName = 'ProductName')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add Missing Statistics', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating statistics ' + s.[Schema] + '.' + s.[TableName] + '.' + s.[StatisticName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Statistics（补充缺失统计信息）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Creating statistics ' + s.[Schema] + '.' + s.[TableName] + '.' + s.[StatisticName] + '（创建统计信息）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'CREATE STATISTICS ' + s.[StatisticName] + ' ON ' + s.[Schema] + '.' + s.[TableName] + ' (' + s.[Columns] + ')' +
                                   CASE WHEN RTRIM(ISNULL(s.[FilterExpression], '')) <> '' THEN ' WHERE ' + s.[FilterExpression] ELSE '' END +
                                   ' WITH SAMPLE ' + CAST(ISNULL(s.[SampleSize], 100) AS NVARCHAR(20)) + ' PERCENT;' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
@@ -1160,8 +1160,8 @@ BEGIN TRY
                           AND ss.[name] = SchemaSmith.fn_StripBracketWrapping(s.[StatisticName]))
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Add Missing Defaults', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering Column ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Defaults（补充缺失默认值）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering Column ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + '（修改列）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + c.[Schema] + '.' + c.[TableName] + ' ADD DEFAULT ' + c.[Default] + ' FOR ' + c.[ColumnName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #Columns c WITH (NOLOCK)
     WHERE RTRIM(ISNULL(c.[Default], '')) <> ''
@@ -1171,8 +1171,8 @@ BEGIN TRY
                           AND COL_NAME(dc.parent_object_id, dc.parent_column_id) = SchemaSmith.fn_StripBracketWrapping(c.ColumnName))
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add Missing Check Constraints', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding check constraint ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[ConstraintName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Check Constraints（补充缺失检查约束）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding check constraint ' + cc.[Schema] + '.' + cc.[TableName] + '.' + cc.[ConstraintName] + '（新增检查约束）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + cc.[Schema] + '.' + cc.[TableName] + ' ADD CONSTRAINT ' + cc.[ConstraintName] + ' CHECK (' + cc.[Expression] + ');' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #CheckConstraints cc WITH (NOLOCK)
     WHERE NOT EXISTS (SELECT * 
@@ -1181,7 +1181,7 @@ BEGIN TRY
                           AND sc.[name] = SchemaSmith.fn_StripBracketWrapping(cc.[ConstraintName]))
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding check constrain to column ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding check constrain to column ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + '（新增列检查约束）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + c.[Schema] + '.' + c.[TableName] + ' ADD CHECK (' + c.[CheckExpression] + ');' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #Columns c WITH (NOLOCK)
     WHERE RTRIM(ISNULL(c.[CheckExpression], '')) <> ''
@@ -1191,8 +1191,8 @@ BEGIN TRY
                           AND COL_NAME(sc.parent_object_id, sc.parent_column_id) = SchemaSmith.fn_StripBracketWrapping(c.[ColumnName]))
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Add Missing Foreign Keys', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding foreign key ' + f.[Schema] + '.' + f.[TableName] + '.' + f.[KeyName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing Foreign Keys（补充缺失外键）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding foreign key ' + f.[Schema] + '.' + f.[TableName] + '.' + f.[KeyName] + '（新增外键）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'ALTER TABLE ' + f.[Schema] + '.' + f.[TableName] + ' ADD CONSTRAINT ' + f.[KeyName] + ' FOREIGN KEY ' + 
                                   '(' + f.[Columns] + ') REFERENCES ' + [RelatedTableSchema] + '.' + f.[RelatedTable] + ' (' + [RelatedColumns] + ')' +
                                   ' ON DELETE ' + [DeleteAction] +
@@ -1204,8 +1204,8 @@ BEGIN TRY
                           AND sf.[name] = SchemaSmith.fn_StripBracketWrapping(f.[KeyName]))
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
-  RAISERROR('Drop Modified or Removed FullText Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping fulltext index on ' + ei.[Schema] + '.' + ei.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Drop Modified or Removed FullText Indexes（删除已修改或移除的全文索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping fulltext index on ' + ei.[Schema] + '.' + ei.[TableName] + '（删除全文索引）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'DROP FULLTEXT INDEX ON ' + ei.[Schema] + '.' + ei.[TableName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
     FROM #ExistingFullTextIndexes ei WITH (NOLOCK)
     LEFT JOIN #FullTextIndexes fi WITH (NOLOCK) ON fi.[Schema] = ei.[Schema]
@@ -1219,8 +1219,8 @@ BEGIN TRY
        OR fi.[TableName] IS NULL
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
-  RAISERROR('Add Missing FullText Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding fulltext index on ' + fi.[Schema] + '.' + fi.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+  RAISERROR('Add Missing FullText Indexes（补充缺失全文索引）', 10, 1) WITH NOWAIT
+  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Adding fulltext index on ' + fi.[Schema] + '.' + fi.[TableName] + '（新增全文索引）'', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
                                   'CREATE FULLTEXT INDEX ON ' + fi.[Schema] + '.' + fi.[TableName] + ' (' + [Columns] + ') KEY INDEX ' + [KeyIndex] + ' ON ' + [FullTextCatalog] + 
                                   ' WITH CHANGE_TRACKING = ' + [ChangeTracking] +
                                   CASE WHEN RTRIM(ISNULL(fi.[StopList], '')) <> '' THEN ', STOPLIST = ' + [StopList] ELSE '' END + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
