@@ -197,7 +197,7 @@ DECLARE @v_SQL VARCHAR(MAX) = STUFF((SELECT ';' + CHAR(13) + CHAR(10) + Task
                                                FROM sys.foreign_keys fk
                                                WHERE EXISTS (SELECT *
                                                                FROM sys.computed_columns cc
-                                                               JOIN sys.foreign_key_columns fc ON fk.[object_id] = fk.[object_id]
+                                                               JOIN sys.foreign_key_columns fc ON fk.[object_id] = fc.[constraint_object_id]
                                                                                               AND ((fc.parent_object_id = cc.[object_id] AND fc.parent_column_id = cc.column_id)
                                                                                                 OR (fc.referenced_object_id = cc.[object_id] AND fc.referenced_column_id = cc.column_id))
                                                                WHERE cc.[definition] LIKE @v_SearchTerm)
