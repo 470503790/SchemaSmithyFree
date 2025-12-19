@@ -94,6 +94,7 @@ public class DataTongs
         else
         {
             // Split into chunks and concatenate
+            // Note: Using Substring is acceptable here as this is a one-time SQL generation operation
             var chunks = new List<string>();
             for (int i = 0; i < escapedTableData.Length; i += chunkSize)
             {
