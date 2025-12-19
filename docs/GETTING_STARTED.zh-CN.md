@@ -6,7 +6,7 @@
 
 ## 目录
 
-- [什么是 SchemaSmithyFree？](#什么是-schemasmithy-free)
+- [什么是 SchemaSmithyFree？](#什么是-schemasmithyfree)
 - [环境要求](#环境要求)
 - [安装和设置](#安装和设置)
 - [核心概念](#核心概念)
