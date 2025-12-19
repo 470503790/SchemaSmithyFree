@@ -6,6 +6,6 @@ public static class ConnectionString
     {
         var security = !string.IsNullOrEmpty(user) && !string.IsNullOrEmpty(password) ? $"User ID={user};Password={password}" : "Integrated Security=True";
 
-        return $"data source={serverName};Initial Catalog={dbName};{security};ApplicationIntent=ReadWrite;TrustServerCertificate=True;";
+        return $"data source={serverName};Initial Catalog={dbName};{security};ApplicationIntent=ReadWrite;Encrypt=False;TrustServerCertificate=True;";
     }
 }
