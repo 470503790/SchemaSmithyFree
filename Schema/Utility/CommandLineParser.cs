@@ -42,7 +42,7 @@ public static class CommandLineParser
             var result = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
             foreach (var argument in Arguments.Where(x => x.StartsWith("/") || x.StartsWith("-")))
             {
-                // split into max 2 parts to handle values with embedded colon or equals
+                // 拆分为最多 2 段以处理包含冒号或等号的值
                 var parts = argument.Split(new[] { ':', '=' }, 2);
                 result[TrimKeyName(parts[0])] = parts.Length switch
                 {
@@ -113,17 +113,17 @@ public static class CommandLineParser
     private static void ShowVersionAndExit(string app)
     {
         var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
-        Console.WriteLine($"{app} MSSQL Community - Version: {FileVersionInfo.GetVersionInfo(assembly.Location).FileVersion}");
+        Console.WriteLine($"{app} MSSQL Community - Version: {FileVersionInfo.GetVersionInfo(assembly.Location).FileVersion}（版本信息）");
         EnvironmentWrapper.GetFromFactory().Exit(0);
     }
 
     private static void ShowHelpAndExit(string app)
     {
-        Console.WriteLine($"{app}.exe [<command>]");
-        Console.WriteLine("  --version                Show the program version");
-        Console.WriteLine("  --LogPath:<logpath>      Path to write logs and create backup directories. The default is current path.");
-        Console.WriteLine("  --ConfigFile:<filepath>  Path and file name of the config file. The default is appsettings.json in the current path.");
-        Console.WriteLine("  --help                   Show the command line options");
+        Console.WriteLine($"用法: {app}.exe [<command>]");
+        Console.WriteLine("  --version                显示程序版本");
+        Console.WriteLine("  --LogPath:<logpath>      写入日志并创建备份目录的路径，默认当前路径。");
+        Console.WriteLine("  --ConfigFile:<filepath>  配置文件的路径与文件名，默认当前路径的 appsettings.json。");
+        Console.WriteLine("  --help                   显示命令行选项");
         EnvironmentWrapper.GetFromFactory().Exit(0);
     }
 }

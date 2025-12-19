@@ -63,7 +63,7 @@ public class SchemaTongs
     {
         var config = FactoryContainer.ResolveOrCreate<IConfigurationRoot>();
         var targetDb = config["Source:Database"]!;
-        if (string.IsNullOrEmpty(targetDb)) throw new Exception("Source database is required");
+        if (string.IsNullOrEmpty(targetDb)) throw new Exception("需要指定源数据库（Source database）");
         _productPath = Path.Combine(config["Product:Path"] ?? ".");
 
         _includeTables = config["ShouldCast:Tables"]?.ToLower() != "false";
@@ -90,7 +90,7 @@ public class SchemaTongs
         using var connection = GetConnection(targetDb);
         using var command = connection.CreateCommand();
 
-        _progressLog.Info("Kindling The Forge");
+        _progressLog.Info("Kindling The Forge（点燃熔炉）");
         ForgeKindler.KindleTheForge(command);
 
         if (_includeTables) ExtractTableDefinitions(command, targetDb);
@@ -109,12 +109,12 @@ public class SchemaTongs
         if (_includeDDLTriggers) ScriptDDLTriggers(sourceDb);
         if (_includeXmlSchemaCollections) ScriptXmlSchemaCollections(sourceDb);
         _progressLog.Info("");
-        _progressLog.Info("Casting Completed Successfully");
+        _progressLog.Info("Casting Completed Successfully（生成完成）");
     }
 
     private void ScriptSchemas(Database sourceDb)
     {
-        _progressLog.Info("Casting Schema Scripts");
+        _progressLog.Info("Casting Schema Scripts（生成架构脚本）");
         sourceDb.PrefetchObjects(typeof(Microsoft.SqlServer.Management.Smo.Schema), _options);
         var castPath = Path.Combine(_templatePath, "Schemas");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
@@ -124,14 +124,14 @@ public class SchemaTongs
             if (schema.IsSystemObject || schema.Name.Contains(@"\") || schema.Name.EqualsIgnoringCase("SchemaSmith")) continue;
 
             var fileName = Path.Combine(castPath, $"{schema.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\n", schema.Script(_options).Cast<string>()));
         }
     }
 
     private void ScriptUserDefinedTypes(Database sourceDb)
     {
-        _progressLog.Info("Casting User Defined Types");
+        _progressLog.Info("Casting User Defined Types（生成用户自定义类型）");
         sourceDb.PrefetchObjects(typeof(UserDefinedDataType), _options);
         sourceDb.PrefetchObjects(typeof(UserDefinedTableType), _options);
         var castPath = Path.Combine(_templatePath, "DataTypes");
@@ -141,7 +141,7 @@ public class SchemaTongs
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains(type.Name.ToLower()) && !_objectsToCast.Contains($"{type.Schema}.{type.Name}".ToLower())) continue;
             
             var fileName = Path.Combine(castPath, $"{type.Schema}.{type.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\n", type.Script(_options).Cast<string>()));
         }
         foreach (UserDefinedTableType type in sourceDb.UserDefinedTableTypes)
@@ -149,14 +149,14 @@ public class SchemaTongs
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains(type.Name.ToLower()) && !_objectsToCast.Contains($"{type.Schema}.{type.Name}".ToLower())) continue;
             
             var fileName = Path.Combine(castPath, $"{type.Schema}.{type.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\n", type.Script(_options).Cast<string>()));
         }
     }
 
     private void ScriptUserDefinedFunctions(Database sourceDb)
     {
-        _progressLog.Info("Casting Function Scripts");
+        _progressLog.Info("Casting Function Scripts（生成函数脚本）");
         sourceDb.PrefetchObjects(typeof(UserDefinedFunction), _options);
         var castPath = Path.Combine(_templatePath, "Functions");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
@@ -219,13 +219,13 @@ DECLARE @v_SQL VARCHAR(MAX) = STUFF((SELECT ';' + CHAR(13) + CHAR(10) + Task
                                                FROM sys.computed_columns cc
                                                WHERE cc.[definition] LIKE @v_SearchTerm) x
                                        FOR XML PATH(''), TYPE).value('.', 'VARCHAR(MAX)'), 1, 3, '') + ';'
-EXEC(@v_SQL) -- Remove any dependencies before updating the function
+EXEC(@v_SQL) -- 更新函数前移除依赖
 GO" : "")}
 {function.ScriptHeader(ScriptNameObjectBase.ScriptHeaderType.ScriptHeaderForCreateOrAlter)}
 {function.TextBody}
 GO
 {AddExtendedProperiesScript(function.ExtendedProperties)}";
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, sql);
         }
     }
@@ -239,7 +239,7 @@ GO
 
     private void ScriptViews(Database sourceDb)
     {
-        _progressLog.Info("Casting View Scripts");
+        _progressLog.Info("Casting View Scripts（生成视图脚本）");
         sourceDb.PrefetchObjects(typeof(View), _options);
         var castPath = Path.Combine(_templatePath, "Views");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
@@ -256,14 +256,14 @@ GO
 {view.TextBody}
 GO
 {AddExtendedProperiesScript(view.ExtendedProperties)}";
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, sql);
         }
     }
 
     private void ScriptStoredProcedures(Database sourceDb)
     {
-        _progressLog.Info("Casting Stored Procedure Scripts");
+        _progressLog.Info("Casting Stored Procedure Scripts（生成存储过程脚本）");
         sourceDb.PrefetchObjects(typeof(StoredProcedure), _options);
         var castPath = Path.Combine(_templatePath, "Procedures");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
@@ -281,14 +281,14 @@ GO
 GO
 {AddExtendedProperiesScript(procedure.ExtendedProperties)}";
 
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, sql);
         }
     }
 
     private void ScriptTableTriggers(Database sourceDb)
     {
-        _progressLog.Info("Casting Table Trigger Scripts");
+        _progressLog.Info("Casting Table Trigger Scripts（生成表触发器脚本）");
         sourceDb.PrefetchObjects(typeof(Table), _options);
         var castPath = Path.Combine(_templatePath, "Triggers");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
@@ -309,7 +309,7 @@ GO
 {trigger.TextBody}
 GO
 {AddExtendedProperiesScript(trigger.ExtendedProperties)}";
-                _progressLog.Info($"  Casting {fileName}");
+                _progressLog.Info($"  Casting {fileName}（生成脚本）");
                 FileWrapper.GetFromFactory().WriteAllText(fileName, sql);
             }
         }
@@ -333,7 +333,7 @@ SELECT TABLE_SCHEMA, TABLE_NAME
   ORDER BY 1, 2
 ";
 
-        _progressLog.Info("Casting Table Structures");
+        _progressLog.Info("Casting Table Structures（生成表结构）");
         var tableDir = Path.Combine(_templatePath, "Tables");
         DirectoryWrapper.GetFromFactory().CreateDirectory(tableDir);
         using var reader = command.ExecuteReader();
@@ -341,18 +341,18 @@ SELECT TABLE_SCHEMA, TABLE_NAME
         {
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains($"{reader["TABLE_NAME"]}".ToLower()) && !_objectsToCast.Contains($"{reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}".ToLower())) continue;
 
-            _progressLog.Info($"  Cast table definition for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
+            _progressLog.Info($"  Cast table definition for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}（生成表定义）");
             commandJson.CommandText = $"EXEC SchemaSmith.GenerateTableJSON @p_Schema = '{reader["TABLE_SCHEMA"]}', @p_Table = '{reader["TABLE_NAME"]}'";
 
             var tableXml = commandJson.ExecuteScalar()?.ToString();
             if (string.IsNullOrWhiteSpace(tableXml))
             {
-                _progressLog.Error($"    No xml returned for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
+                _progressLog.Error($"    No xml returned for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}（未返回 xml）");
                 continue;
             }
 
             var filename = Path.Combine(tableDir, $"{reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}.json");
-            _progressLog.Info($"    Casting {filename}");
+            _progressLog.Info($"    Casting {filename}（生成脚本）");
             var serializer = new XmlSerializer(typeof(Schema.Domain.Table));
             Schema.Domain.Table table;
             using (var stringReader = new StringReader(tableXml))
@@ -360,14 +360,14 @@ SELECT TABLE_SCHEMA, TABLE_NAME
                 table = (Schema.Domain.Table)serializer.Deserialize(stringReader);
             }
             var json = JsonConvert.SerializeObject(table, Formatting.Indented);
-            _ = JsonConvert.DeserializeObject<Schema.Domain.Table>(json); // make sure the json is valid
+            _ = JsonConvert.DeserializeObject<Schema.Domain.Table>(json); // 确保 json 有效
             FileWrapper.GetFromFactory().WriteAllText(filename, json);
         }
     }
 
     private void ScriptFullTextCatalogs(Database sourceDb)
     {
-        _progressLog.Info("Casting FullText Catalog Scripts");
+        _progressLog.Info("Casting FullText Catalog Scripts（生成全文目录脚本）");
         var castPath = Path.Combine(_templatePath, "FullTextCatalogs");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
         foreach (FullTextCatalog catalog in sourceDb.FullTextCatalogs)
@@ -375,14 +375,14 @@ SELECT TABLE_SCHEMA, TABLE_NAME
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains(catalog.Name.ToLower())) continue;
             
             var fileName = Path.Combine(castPath, $"{catalog.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\nGO\r\n", catalog.Script(_options).Cast<string>()));
         }
     }
 
     private void ScriptFullTextStopLists(Database sourceDb)
     {
-        _progressLog.Info("Casting FullText Stop List Scripts");
+        _progressLog.Info("Casting FullText Stop List Scripts（生成全文停用词表脚本）");
         var castPath = Path.Combine(_templatePath, "FullTextStopLists");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
         foreach (FullTextStopList list in sourceDb.FullTextStopLists)
@@ -390,14 +390,14 @@ SELECT TABLE_SCHEMA, TABLE_NAME
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains(list.Name.ToLower())) continue;
 
             var fileName = Path.Combine(castPath, $"{list.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\nGO\r\n", list.Script(_options).Cast<string>()));
         }
     }
 
     private void ScriptDDLTriggers(Database sourceDb)
     {
-        _progressLog.Info("Casting Database DDL Trigger Scripts");
+        _progressLog.Info("Casting Database DDL Trigger Scripts（生成数据库 DDL 触发器脚本）");
         var castPath = Path.Combine(_templatePath, "DDLTriggers");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
         foreach (DatabaseDdlTrigger trigger in sourceDb.Triggers)
@@ -412,14 +412,14 @@ GO
 {trigger.TextBody}
 GO
 {AddExtendedProperiesScript(trigger.ExtendedProperties)}";
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, sql);
         }
     }
 
     private void ScriptXmlSchemaCollections(Database sourceDb)
     {
-        _progressLog.Info("Casting XML Schema Collection Scripts");
+        _progressLog.Info("Casting XML Schema Collection Scripts（生成 XML 架构集合脚本）");
         var castPath = Path.Combine(_templatePath, "XMLSchemaCollections");
         DirectoryWrapper.GetFromFactory().CreateDirectory(castPath);
         foreach (XmlSchemaCollection collection in sourceDb.XmlSchemaCollections)
@@ -427,7 +427,7 @@ GO
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains(collection.Name.ToLower()) && !_objectsToCast.Contains($"{collection.Schema}.{collection.Name}".ToLower())) continue;
 
             var fileName = Path.Combine(castPath, $"{collection.Schema}.{collection.Name}.sql");
-            _progressLog.Info($"  Casting {fileName}");
+            _progressLog.Info($"  Casting {fileName}（生成脚本）");
             FileWrapper.GetFromFactory().WriteAllText(fileName, string.Join("\r\nGO\r\n", collection.Script(_options).Cast<string>().Select(FormatXmlInScript)));
         }
     }
@@ -450,7 +450,7 @@ GO
         }
         catch
         {
-            return xml; // if parsing fails then send it back unformatted
+            return xml; // 如果解析失败则返回未格式化内容
         }
     }
 }

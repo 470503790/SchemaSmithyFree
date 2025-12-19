@@ -38,7 +38,7 @@ public class DataTongs
         DirectoryWrapper.GetFromFactory().CreateDirectory(outputPath);
 
         var sourceDb = config["Source:Database"]!;
-        if (string.IsNullOrEmpty(sourceDb)) throw new Exception("Source database is required");
+        if (string.IsNullOrEmpty(sourceDb)) throw new Exception("需要指定源数据库（Source database）");
 
         var tables = config.GetSection("Tables")
             .AsEnumerable()
@@ -49,12 +49,12 @@ public class DataTongs
             .Where(x => !x.Key.Equals("TableFilters"))
             .ToDictionary(t => t.Key.Replace("TableFilters:", ""), t => t.Value);
 
-        _progressLog.Info("Starting DataTongs...");
+        _progressLog.Info("Starting DataTongs...（开始 DataTongs）");
         using var sourceConnection = GetConnection(sourceDb);
         var cmd = sourceConnection.CreateCommand();
         foreach (var table in tables)
         {
-            _progressLog.Info($"  Casting data for: {table.Key}");
+            _progressLog.Info($"  Casting data for: {table.Key}（生成数据）");
             var parts = table.Key.Split('.').Select(p => p.Trim()).ToArray();
             var tableSchema = parts.Length == 2 ? parts[0] : "dbo";
             var tableName = parts.Length == 2 ? parts[1] : parts[0];
@@ -70,7 +70,7 @@ public class DataTongs
             FileWrapper.GetFromFactory().WriteAllText(Path.Combine(outputPath, $"Populate {tableSchema}.{tableName}.sql"), mergeSQL);
         }
         sourceConnection.Close();
-        _progressLog.Info("DataTongs completed successfully.");
+        _progressLog.Info("DataTongs completed successfully.（DataTongs 成功完成）");
     }
 
     private static string BuildMergeSql(IDbCommand cmd, string tableSchema, string tableName, string? tableData, string matchColumns, bool disableTriggers, bool mergeUpdate, bool mergeDelete, string? filter)
