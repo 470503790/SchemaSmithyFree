@@ -1,6 +1,8 @@
 # SchemaQuench
 ![.Build validate](https://github.com/Schema-Smith/SchemaSmithyFree/actions/workflows/continuous-integration.yml/badge.svg)
 
+English | [简体中文](README.zh-CN.md)
+
 SchemaQuench is an opinionated, state based, database migration tool.  Similar in concept to HashiCorp's Terraform, SchemaQuench takes the desired end state for a set of databases in the form of metadata and transforms whatever server it is applied to making it match that state.   
 
 ## Why not just use migrations to maintain a server?
@@ -32,3 +34,8 @@ from the root of the project and the [Test Product](TestProducts/ValidProduct/Pr
 
 - For more samples, see our [demo repository](https://github.com/Schema-Smith/SchemaSmithDemos).
 - Checkout our [wiki](https://github.com/Schema-Smith/SchemaSmithyFree/wiki) for documentation about how these tools work to make deploying sql server schema effortless.
+
+## Documentation
+
+- [Getting Started Guide](docs/GETTING_STARTED.zh-CN.md) - For beginners getting started with SchemaSmithyFree (中文版)
+- [Tools Guide](docs/TOOLS_GUIDE.zh-CN.md) - Detailed guide for SchemaQuench, SchemaTongs, and DataTongs (中文版)
