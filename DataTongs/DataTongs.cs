@@ -79,8 +79,32 @@ public class DataTongs
         var insertColumns = GetInsertColumns(cmd, tableSchema, tableName);
         var identityInsert = CheckIdentityInsertRequired(cmd, tableSchema, tableName);
 
-        var mergeSQL = $@"
-DECLARE @v_xml XML = N'{tableData?.Replace("'", "''")}';
+        // Build the core MERGE statement
+        var mergeSQL = $@"DECLARE @v_xml_data NVARCHAR(MAX) = ";
+        
+        // Split large XML data into chunks to avoid string literal size limitations
+        // SQL Server has a limit on string literals (around 4000-8000 chars depending on context)
+        var escapedTableData = tableData?.Replace("'", "''") ?? "";
+        const int chunkSize = 4000;
+        
+        if (escapedTableData.Length <= chunkSize)
+        {
+            mergeSQL += $"N'{escapedTableData}';\r\n";
+        }
+        else
+        {
+            // Split into chunks and concatenate
+            // Note: Using Substring is acceptable here as this is a one-time SQL generation operation
+            var chunks = new List<string>();
+            for (int i = 0; i < escapedTableData.Length; i += chunkSize)
+            {
+                var length = Math.Min(chunkSize, escapedTableData.Length - i);
+                chunks.Add($"N'{escapedTableData.Substring(i, length)}'");
+            }
+            mergeSQL += string.Join(" +\r\n       ", chunks) + ";\r\n";
+        }
+
+        mergeSQL += $@"DECLARE @v_xml XML = CAST(@v_xml_data AS XML);
 
 {(disableTriggers ? $"ALTER TABLE [{tableSchema}].[{tableName}] DISABLE TRIGGER ALL;" : "")}
 {(identityInsert ? $"SET IDENTITY_INSERT [{tableSchema}].[{tableName}] ON;" : "")} 
