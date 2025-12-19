@@ -24,7 +24,7 @@ BEGIN
                      ',', '</i><i>'
                    ) +
                    CAST('</i>' AS NVARCHAR(MAX))
-  
+
   SET @Xml = CAST(@XmlString AS XML)
 
   INSERT @r_Result ([Value])
