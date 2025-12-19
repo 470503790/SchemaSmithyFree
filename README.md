@@ -15,7 +15,7 @@ The state of your metadata repository at the time of your last release is an exa
 > 
 > IDEs: Visual Studio 2022, JetBrains Rider
 > 
-> MSSQL Server: Currently testing against 2019-CU27-ubuntu-20.04 but should work for any version with a compatibility level of 130 or higher on the databases
+> MSSQL Server: Currently testing against 2019-CU27-ubuntu-20.04. SQL Server 2014 (compatibility level 120) is the minimum supported version, including XML-based table definitions and data payloads for quench operations.
 
 ## Quick start
 

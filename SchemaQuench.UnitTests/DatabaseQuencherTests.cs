@@ -57,7 +57,7 @@ public class DatabaseQuencherTests
             var quencher = new DatabaseQuencher("TestKindlingForge", template, "StrapMe", false, "0", "0");
             quencher.Quench();
 
-            var expectedBoostrapCommand = commands.FirstOrDefault(c => c.StartsWith("CREATE OR ALTER PROCEDURE [SchemaSmith].[TableQuench]"));
+            var expectedBoostrapCommand = commands.FirstOrDefault(c => c.StartsWith("IF OBJECT_ID('SchemaSmith.TableQuench'"));
             Assert.That(expectedBoostrapCommand, Is.Not.Null);
 
             FactoryContainer.Clear();

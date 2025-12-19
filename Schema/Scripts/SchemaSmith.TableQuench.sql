@@ -1,6 +1,10 @@
-CREATE OR ALTER PROCEDURE [SchemaSmith].[TableQuench] 
+IF OBJECT_ID('SchemaSmith.TableQuench', 'P') IS NOT NULL
+  DROP PROCEDURE [SchemaSmith].[TableQuench]
+GO
+
+CREATE PROCEDURE [SchemaSmith].[TableQuench] 
   @ProductName NVARCHAR(50),
-  @TableDefinitions NVARCHAR(MAX),
+  @TableDefinitions XML,
   @WhatIf BIT = 0,
   @DropUnknownIndexes BIT = 0,
   @DropTablesRemovedFromProduct BIT = 1,
@@ -10,35 +14,31 @@ BEGIN TRY
   DECLARE @v_SQL NVARCHAR(MAX) = '',
           @v_DatabaseCollation NVARCHAR(200) = CAST(DATABASEPROPERTYEX(DB_NAME(), 'COLLATION') AS NVARCHAR(200))
   SET NOCOUNT ON
-  RAISERROR('Parse Tables from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #TableDefinitions
-  SELECT [Schema] = SchemaSmith.fn_SafeBracketWrap(ISNULL([Schema], 'dbo')), [Name] = SchemaSmith.fn_SafeBracketWrap([Name]), [CompressionType] = ISNULL(NULLIF(RTRIM([CompressionType]), ''), 'NONE'), 
-         [IsTemporal] = ISNULL([IsTemporal], 0), [OldName] = SchemaSmith.fn_SafeBracketWrap([OldName]),
-         [Indexes], [XmlIndexes], [Columns], [Statistics], [FullTextIndex], [ForeignKeys], [CheckConstraints]
+  RAISERROR('Parse Tables from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#TableDefinitions') IS NOT NULL DROP TABLE #TableDefinitions
+  SELECT [Schema] = SchemaSmith.fn_SafeBracketWrap(ISNULL(TableNode.value('(Schema/text())[1]', 'NVARCHAR(500)'), 'dbo')),
+         [Name] = SchemaSmith.fn_SafeBracketWrap(TableNode.value('(Name/text())[1]', 'NVARCHAR(500)')),
+         [CompressionType] = ISNULL(NULLIF(RTRIM(TableNode.value('(CompressionType/text())[1]', 'NVARCHAR(100)')), ''), 'NONE'), 
+         [IsTemporal] = ISNULL(TableNode.value('(IsTemporal/text())[1]', 'BIT'), 0),
+         [OldName] = SchemaSmith.fn_SafeBracketWrap(TableNode.value('(OldName/text())[1]', 'NVARCHAR(500)')),
+         [Indexes] = TableNode.query('Indexes'),
+         [XmlIndexes] = TableNode.query('XmlIndexes'),
+         [Columns] = TableNode.query('Columns'),
+         [Statistics] = TableNode.query('Statistics'),
+         [FullTextIndex] = TableNode.query('FullTextIndex'),
+         [ForeignKeys] = TableNode.query('ForeignKeys'),
+         [CheckConstraints] = TableNode.query('CheckConstraints')
     INTO #TableDefinitions
-    FROM OPENJSON(@TableDefinitions) WITH (
-      [Schema] NVARCHAR(500) '$.Schema',
-      [Name] NVARCHAR(500) '$.Name',
-      [CompressionType] NVARCHAR(100) '$.CompressionType',
-      [IsTemporal] BIT '$.IsTemporal',
-      [OldName] NVARCHAR(500) '$.OldName',
-	  [Indexes] NVARCHAR(MAX) '$.Indexes' AS JSON,
-	  [XmlIndexes] NVARCHAR(MAX) '$.XmlIndexes' AS JSON,
-      [Columns] NVARCHAR(MAX) '$.Columns' AS JSON,
-	  [Statistics] NVARCHAR(MAX) '$.Statistics' AS JSON,
-	  [FullTextIndex] NVARCHAR(MAX) '$.FullTextIndex' AS JSON,
-      [ForeignKeys] NVARCHAR(MAX) '$.ForeignKeys' AS JSON,
-      [CheckConstraints] NVARCHAR(MAX) '$.CheckConstraints' AS JSON
-      ) t;
+    FROM @TableDefinitions.nodes('/Tables/Table') AS t(TableNode);
 
-  DROP TABLE IF EXISTS #Tables
+  IF OBJECT_ID('tempdb..#Tables') IS NOT NULL DROP TABLE #Tables
   SELECT [Schema], [Name], [CompressionType], [IsTemporal], [OldName],
          CONVERT(BIT, CASE WHEN OBJECT_ID([Schema] + '.' + [Name], 'U') IS NULL AND OBJECT_ID([Schema] + '.' + [OldName], 'U') IS NULL THEN 1 ELSE 0 END) AS NewTable
     INTO #Tables
     FROM #TableDefinitions WITH (NOLOCK)
   
-  RAISERROR('Parse Columns from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #Columns
+  RAISERROR('Parse Columns from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#Columns') IS NOT NULL DROP TABLE #Columns
   SELECT t.[Schema], t.[Name] AS [TableName], [ColumnName] = SchemaSmith.fn_SafeBracketWrap(c.[ColumnName]), [DataType] = REPLACE(c.[DataType], 'ROWVERSION', 'TIMESTAMP'), 
          [Nullable] = ISNULL(c.[Nullable], 0), c.[Default], c.[CheckExpression], c.[ComputedExpression], [Persisted] = ISNULL(c.[Persisted], 0),
          [Sparse] = ISNULL(c.[Sparse], 0), [Collation] = RTRIM(ISNULL(c.[Collation], '')), [DataMaskFunction] = RTRIM(ISNULL(c.[DataMaskFunction], '')),
@@ -55,19 +55,18 @@ BEGIN TRY
               END AS [ColumnScript]
     INTO #Columns
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON(Columns) WITH (
-      [ColumnName] NVARCHAR(500) '$.Name',
-      [DataType] NVARCHAR(100) '$.DataType',
-      [Nullable] BIT '$.Nullable',
-      [Default] NVARCHAR(MAX) '$.Default',
-      [CheckExpression] NVARCHAR(MAX) '$.CheckExpression',
-      [ComputedExpression] NVARCHAR(MAX) '$.ComputedExpression',
-      [Persisted] BIT '$.Persisted',
-      [Sparse] BIT '$.Sparse',
-      [Collation] NVARCHAR(500) '$.Collation',
-      [DataMaskFunction] NVARCHAR(500) '$.DataMaskFunction',
-      [OldName] NVARCHAR(500) '$.OldName'
-      ) c;
+    CROSS APPLY t.[Columns].nodes('/Columns/Column') c(ColumnNode)
+    CROSS APPLY (SELECT [ColumnName] = ColumnNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [DataType] = ColumnNode.value('(DataType/text())[1]', 'NVARCHAR(100)'),
+                        [Nullable] = ColumnNode.value('(Nullable/text())[1]', 'BIT'),
+                        [Default] = ColumnNode.value('(Default/text())[1]', 'NVARCHAR(MAX)'),
+                        [CheckExpression] = ColumnNode.value('(CheckExpression/text())[1]', 'NVARCHAR(MAX)'),
+                        [ComputedExpression] = ColumnNode.value('(ComputedExpression/text())[1]', 'NVARCHAR(MAX)'),
+                        [Persisted] = ColumnNode.value('(Persisted/text())[1]', 'BIT'),
+                        [Sparse] = ColumnNode.value('(Sparse/text())[1]', 'BIT'),
+                        [Collation] = ColumnNode.value('(Collation/text())[1]', 'NVARCHAR(500)'),
+                        [DataMaskFunction] = ColumnNode.value('(DataMaskFunction/text())[1]', 'NVARCHAR(500)'),
+                        [OldName] = ColumnNode.value('(OldName/text())[1]', 'NVARCHAR(500)')) c;
 
   -- Don't try to apply tables without columns
   DELETE FROM #Tables
@@ -75,109 +74,118 @@ BEGIN TRY
   DELETE FROM #TableDefinitions
     WHERE NOT EXISTS (SELECT * FROM #Columns C WITH (NOLOCK) WHERE C.[Schema] = #TableDefinitions.[Schema] AND C.[TableName] = #TableDefinitions.[Name])
   
-  RAISERROR('Parse Indexes from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #Indexes
+  RAISERROR('Parse Indexes from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#Indexes') IS NOT NULL DROP TABLE #Indexes
   SELECT t.[Schema], t.[Name] AS [TableName], [IndexName] = SchemaSmith.fn_SafeBracketWrap(i.[IndexName]), [CompressionType] = ISNULL(NULLIF(RTRIM(i.[CompressionType]), ''), 'NONE'), 
          [PrimaryKey] = ISNULL(i.[PrimaryKey], 0), [Unique] = COALESCE(NULLIF(i.[Unique], 0), NULLIF(i.[PrimaryKey], 0), i.[UniqueConstraint], 0),
          [UniqueConstraint] = ISNULL(i.[UniqueConstraint], 0), [Clustered] = ISNULL(i.[Clustered], 0), [ColumnStore] = ISNULL(i.[ColumnStore], 0), [FillFactor] = ISNULL(NULLIF(i.[FillFactor], 0), 100),
          i.[FilterExpression], 
-         [IndexColumns] = (SELECT STRING_AGG(CAST(CASE WHEN RTRIM([value]) LIKE '% DESC' 
-                                                       THEN SchemaSmith.fn_SafeBracketWrap(SUBSTRING(RTRIM([value]), 1, LEN(RTRIM([value])) - 5)) + ' DESC'
-                                                       ELSE SchemaSmith.fn_SafeBracketWrap([value])
-                                                       END AS NVARCHAR(MAX)), ',') 
-                             FROM STRING_SPLIT(i.[IndexColumns], ',') 
-                             WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''),
-         [IncludeColumns] = (SELECT STRING_AGG(CAST(SchemaSmith.fn_SafeBracketWrap([value]) AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY SchemaSmith.fn_SafeBracketWrap([value]))
-                               FROM STRING_SPLIT(i.[IncludeColumns], ',') 
-                               WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> '')
+         [IndexColumns] = STUFF((SELECT ',' + CAST(CASE WHEN RTRIM([Value]) LIKE '% DESC' 
+                                                        THEN SchemaSmith.fn_SafeBracketWrap(SUBSTRING(RTRIM([Value]), 1, LEN(RTRIM([Value])) - 5)) + ' DESC'
+                                                        ELSE SchemaSmith.fn_SafeBracketWrap([Value])
+                                                        END AS NVARCHAR(MAX))
+                                   FROM SchemaSmith.fn_SplitCsv(i.[IndexColumns])
+                                   WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                                   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, ''),
+         [IncludeColumns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
+                                     FROM SchemaSmith.fn_SplitCsv(i.[IncludeColumns])
+                                     WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                                     ORDER BY SchemaSmith.fn_SafeBracketWrap([Value])
+                                     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
     INTO #Indexes
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON(Indexes) WITH (
-      [IndexName] NVARCHAR(500) '$.Name',
-      [CompressionType] NVARCHAR(100) '$.CompressionType',
-      [PrimaryKey] BIT '$.PrimaryKey',
-      [Unique] BIT '$.Unique',
-	  [UniqueConstraint] BIT '$.UniqueConstraint',
-      [Clustered] BIT '$.Clustered',
-      [ColumnStore] BIT '$.ColumnStore',
-      [FillFactor] TINYINT '$.FillFactor',
-      [FilterExpression] NVARCHAR(MAX) '$.FilterExpression',
-      [IndexColumns] NVARCHAR(MAX) '$.IndexColumns',
-      [IncludeColumns] NVARCHAR(MAX) '$.IncludeColumns'
-      ) i;
+    CROSS APPLY t.[Indexes].nodes('/Indexes/Index') i(IndexNode)
+    CROSS APPLY (SELECT [IndexName] = IndexNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [CompressionType] = IndexNode.value('(CompressionType/text())[1]', 'NVARCHAR(100)'),
+                        [PrimaryKey] = IndexNode.value('(PrimaryKey/text())[1]', 'BIT'),
+                        [Unique] = IndexNode.value('(Unique/text())[1]', 'BIT'),
+                        [UniqueConstraint] = IndexNode.value('(UniqueConstraint/text())[1]', 'BIT'),
+                        [Clustered] = IndexNode.value('(Clustered/text())[1]', 'BIT'),
+                        [ColumnStore] = IndexNode.value('(ColumnStore/text())[1]', 'BIT'),
+                        [FillFactor] = IndexNode.value('(FillFactor/text())[1]', 'TINYINT'),
+                        [FilterExpression] = IndexNode.value('(FilterExpression/text())[1]', 'NVARCHAR(MAX)'),
+                        [IndexColumns] = IndexNode.value('(IndexColumns/text())[1]', 'NVARCHAR(MAX)'),
+                        [IncludeColumns] = IndexNode.value('(IncludeColumns/text())[1]', 'NVARCHAR(MAX)')) i;
   
-  RAISERROR('Parse XML Indexes from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #XmlIndexes
+  RAISERROR('Parse XML Indexes from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#XmlIndexes') IS NOT NULL DROP TABLE #XmlIndexes
   SELECT t.[Schema], t.[Name] AS [TableName], [IndexName] = SchemaSmith.fn_SafeBracketWrap(i.[IndexName]), i.[IsPrimary],
          [Column] = SchemaSmith.fn_SafeBracketWrap(i.[Column]), [PrimaryIndex] = SchemaSmith.fn_SafeBracketWrap(i.[PrimaryIndex]),
          i.[SecondaryIndexType]
     INTO #XmlIndexes
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON(XmlIndexes) WITH (
-      [IndexName] NVARCHAR(500) '$.Name',
-      [IsPrimary] BIT '$.IsPrimary',
-      [Column] NVARCHAR(500) '$.Column',
-      [PrimaryIndex] NVARCHAR(500) '$.PrimaryIndex',
-	  [SecondaryIndexType] NVARCHAR(500) '$.SecondaryIndexType'
-      ) i;
+    CROSS APPLY t.[XmlIndexes].nodes('/XmlIndexes/XmlIndex') i(IndexNode)
+    CROSS APPLY (SELECT [IndexName] = IndexNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [IsPrimary] = IndexNode.value('(IsPrimary/text())[1]', 'BIT'),
+                        [Column] = IndexNode.value('(Column/text())[1]', 'NVARCHAR(500)'),
+                        [PrimaryIndex] = IndexNode.value('(PrimaryIndex/text())[1]', 'NVARCHAR(500)'),
+                        [SecondaryIndexType] = IndexNode.value('(SecondaryIndexType/text())[1]', 'NVARCHAR(500)')) i;
 
-  RAISERROR('Parse Foreign Keys from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ForeignKeys
+  RAISERROR('Parse Foreign Keys from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#ForeignKeys') IS NOT NULL DROP TABLE #ForeignKeys
   SELECT t.[Schema], t.[Name] AS [TableName], [KeyName] = SchemaSmith.fn_SafeBracketWrap(f.[KeyName]), 
          [RelatedTableSchema] = SchemaSmith.fn_SafeBracketWrap(ISNULL(f.[RelatedTableSchema], 'dbo')), [RelatedTable] = SchemaSmith.fn_SafeBracketWrap(f.[RelatedTable]), 
-         [Columns] = (SELECT STRING_AGG(CAST(SchemaSmith.fn_SafeBracketWrap([value]) AS NVARCHAR(MAX)), ',') FROM STRING_SPLIT(f.[Columns], ',') WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''),
-         [RelatedColumns] = (SELECT STRING_AGG(CAST(SchemaSmith.fn_SafeBracketWrap([value]) AS NVARCHAR(MAX)), ',') FROM STRING_SPLIT(f.[RelatedColumns], ',') WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''),
+         [Columns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
+                              FROM SchemaSmith.fn_SplitCsv(f.[Columns])
+                              WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                              FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, ''),
+         [RelatedColumns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
+                                     FROM SchemaSmith.fn_SplitCsv(f.[RelatedColumns])
+                                     WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                                     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, ''),
          [DeleteAction] = ISNULL(NULLIF(RTRIM([DeleteAction]), ''), 'NO ACTION'),
          [UpdateAction] = ISNULL(NULLIF(RTRIM([UpdateAction]), ''), 'NO ACTION')
     INTO #ForeignKeys
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON(ForeignKeys) WITH (
-      [KeyName] NVARCHAR(500) '$.Name',
-      [Columns] NVARCHAR(MAX) '$.Columns',
-      [RelatedTableSchema] NVARCHAR(500) '$.RelatedTableSchema',
-      [RelatedTable] NVARCHAR(500) '$.RelatedTable',
-      [RelatedColumns] NVARCHAR(MAX) '$.RelatedColumns',
-      [DeleteAction] NVARCHAR(20) '$.DeleteAction',
-      [UpdateAction] NVARCHAR(20) '$.UpdateAction'
-      ) f;
+    CROSS APPLY t.[ForeignKeys].nodes('/ForeignKeys/ForeignKey') f(FkNode)
+    CROSS APPLY (SELECT [KeyName] = FkNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [Columns] = FkNode.value('(Columns/text())[1]', 'NVARCHAR(MAX)'),
+                        [RelatedTableSchema] = FkNode.value('(RelatedTableSchema/text())[1]', 'NVARCHAR(500)'),
+                        [RelatedTable] = FkNode.value('(RelatedTable/text())[1]', 'NVARCHAR(500)'),
+                        [RelatedColumns] = FkNode.value('(RelatedColumns/text())[1]', 'NVARCHAR(MAX)'),
+                        [DeleteAction] = FkNode.value('(DeleteAction/text())[1]', 'NVARCHAR(20)'),
+                        [UpdateAction] = FkNode.value('(UpdateAction/text())[1]', 'NVARCHAR(20)')) f;
   
-  RAISERROR('Parse Table Level Check Constraints from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #CheckConstraints
+  RAISERROR('Parse Table Level Check Constraints from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#CheckConstraints') IS NOT NULL DROP TABLE #CheckConstraints
   SELECT t.[Schema], t.[Name] AS [TableName], c.[ConstraintName], c.[Expression]
     INTO #CheckConstraints
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON(CheckConstraints) WITH (
-      [ConstraintName] NVARCHAR(500) '$.Name',
-      [Expression] NVARCHAR(MAX) '$.Expression'
-      ) c;
+    CROSS APPLY t.[CheckConstraints].nodes('/CheckConstraints/CheckConstraint') c(CheckNode)
+    CROSS APPLY (SELECT [ConstraintName] = CheckNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [Expression] = CheckNode.value('(Expression/text())[1]', 'NVARCHAR(MAX)')) c;
   
-  RAISERROR('Parse Statistics from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #Statistics
+  RAISERROR('Parse Statistics from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#Statistics') IS NOT NULL DROP TABLE #Statistics
   SELECT t.[Schema], t.[Name] AS [TableName], [StatisticName] = SchemaSmith.fn_SafeBracketWrap(s.[StatisticName]), [SampleSize] = ISNULL(s.[SampleSize], 0), s.[FilterExpression],
-         [Columns] = (SELECT STRING_AGG(CAST(SchemaSmith.fn_SafeBracketWrap([value]) AS NVARCHAR(MAX)), ',') FROM STRING_SPLIT(s.[Columns], ',') WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> '')
+         [Columns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
+                              FROM SchemaSmith.fn_SplitCsv(s.[Columns])
+                              WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                              FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
     INTO #Statistics
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON([Statistics]) WITH (
-      [StatisticName] NVARCHAR(500) '$.Name',
-      [SampleSize] TINYINT '$.SampleSize',
-      [FilterExpression] NVARCHAR(MAX) '$.FilterExpression',
-      [Columns] NVARCHAR(MAX) '$.Columns'
-      ) s;
+    CROSS APPLY t.[Statistics].nodes('/Statistics/Statistic') s(StatNode)
+    CROSS APPLY (SELECT [StatisticName] = StatNode.value('(Name/text())[1]', 'NVARCHAR(500)'),
+                        [SampleSize] = StatNode.value('(SampleSize/text())[1]', 'TINYINT'),
+                        [FilterExpression] = StatNode.value('(FilterExpression/text())[1]', 'NVARCHAR(MAX)'),
+                        [Columns] = StatNode.value('(Columns/text())[1]', 'NVARCHAR(MAX)')) s;
   
-  RAISERROR('Parse Full Text Indexes from Json', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #FullTextIndexes
+  RAISERROR('Parse Full Text Indexes from Xml', 10, 1) WITH NOWAIT
+  IF OBJECT_ID('tempdb..#FullTextIndexes') IS NOT NULL DROP TABLE #FullTextIndexes
   SELECT t.[Schema], t.[Name] AS [TableName], [FullTextCatalog] = SchemaSmith.fn_SafeBracketWrap(f.[FullTextCatalog]), [KeyIndex] = SchemaSmith.fn_SafeBracketWrap(f.[KeyIndex]), 
          f.[ChangeTracking], [StopList] = SchemaSmith.fn_SafeBracketWrap(COALESCE(NULLIF(RTRIM(f.[StopList]), ''), 'SYSTEM')),
-         [Columns] = (SELECT STRING_AGG(CAST(SchemaSmith.fn_SafeBracketWrap([value]) AS NVARCHAR(MAX)), ',') FROM STRING_SPLIT(f.[Columns], ',') WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> '')
+         [Columns] = STUFF((SELECT ',' + CAST(SchemaSmith.fn_SafeBracketWrap([Value]) AS NVARCHAR(MAX))
+                              FROM SchemaSmith.fn_SplitCsv(f.[Columns])
+                              WHERE SchemaSmith.fn_StripBracketWrapping(RTRIM(LTRIM([Value]))) <> ''
+                              FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
     INTO #FullTextIndexes
     FROM #TableDefinitions t WITH (NOLOCK)
-    CROSS APPLY OPENJSON([FullTextIndex]) WITH (
-      [Columns] NVARCHAR(MAX) '$.Columns',
-      [FullTextCatalog] NVARCHAR(500) '$.FullTextCatalog',
-      [KeyIndex] NVARCHAR(500) '$.KeyIndex',
-      [ChangeTracking] NVARCHAR(500) '$.ChangeTracking',
-      [StopList] NVARCHAR(500) '$.StopList'
-      ) f;
+    CROSS APPLY t.[FullTextIndex].nodes('/FullTextIndex') f(FullTextNode)
+    CROSS APPLY (SELECT [Columns] = FullTextNode.value('(Columns/text())[1]', 'NVARCHAR(MAX)'),
+                        [FullTextCatalog] = FullTextNode.value('(FullTextCatalog/text())[1]', 'NVARCHAR(500)'),
+                        [KeyIndex] = FullTextNode.value('(KeyIndex/text())[1]', 'NVARCHAR(500)'),
+                        [ChangeTracking] = FullTextNode.value('(ChangeTracking/text())[1]', 'NVARCHAR(500)'),
+                        [StopList] = FullTextNode.value('(StopList/text())[1]', 'NVARCHAR(500)')) f;
   
   -- Clustered index compression overrides the table compression
   RAISERROR('Override table compression to match clustered index', 10, 1) WITH NOWAIT
@@ -194,32 +202,35 @@ BEGIN TRY
     FROM #Tables t WITH (NOLOCK)
 
   RAISERROR('Handle Table Renames', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Rename ' + T.[Schema] + '.' + T.[OldName] + ' to ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(T.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(T.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(T.[Name]) + ''';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Tables T WITH (NOLOCK)
-    WHERE OBJECT_ID(T.[Schema] + '.' + T.[OldName]) IS NOT NULL
-      AND OBJECT_ID(T.[Schema] + '.' + T.[Name]) IS NULL
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + T.[Schema] + '.' + T.[OldName] + ' to ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(T.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(T.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(T.[Name]) + ''';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX))
+                            FROM #Tables T WITH (NOLOCK)
+                            WHERE OBJECT_ID(T.[Schema] + '.' + T.[OldName]) IS NOT NULL
+                              AND OBJECT_ID(T.[Schema] + '.' + T.[Name]) IS NULL
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Handle Column Renames', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Rename ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[OldName] + ' to ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(c.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[TableName]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(c.[ColumnName]) + ''', ''COLUMN'';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Columns c WITH (NOLOCK)
-    WHERE COLUMNPROPERTY(OBJECT_ID(c.[Schema] + '.' + c.[TableName]), c.[OldName], 'AllowsNull') IS NOT NULL
-      AND COLUMNPROPERTY(OBJECT_ID(c.[Schema] + '.' + c.[TableName]), c.[ColumnName], 'AllowsNull') IS NULL
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Rename ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[OldName] + ' to ' + c.[Schema] + '.' + c.[TableName] + '.' + c.[ColumnName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'EXEC sp_rename ''' + SchemaSmith.fn_StripBracketWrapping(c.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[TableName]) + '.' + SchemaSmith.fn_StripBracketWrapping(c.[OldName]) + ''', ''' + SchemaSmith.fn_StripBracketWrapping(c.[ColumnName]) + ''', ''COLUMN'';' + CHAR(13) + CHAR(10) AS NVARCHAR(MAX))
+                            FROM #Columns c WITH (NOLOCK)
+                            WHERE COLUMNPROPERTY(OBJECT_ID(c.[Schema] + '.' + c.[TableName]), c.[OldName], 'AllowsNull') IS NOT NULL
+                              AND COLUMNPROPERTY(OBJECT_ID(c.[Schema] + '.' + c.[TableName]), c.[ColumnName], 'AllowsNull') IS NULL
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Turn off Temporal Tracking for tables no longer defined temporal', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Turn OFF Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' SET (SYSTEM_VERSIONING = OFF);' + CHAR(13) + CHAR(10) +
-                                  'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' DROP PERIOD FOR SYSTEM_TIME;' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Tables T WITH (NOLOCK)
-    WHERE t.IsTemporal = 0
-      AND OBJECTPROPERTY(OBJECT_ID([Schema] + '.' + [Name]), 'TableTemporalType') = 2
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Turn OFF Temporal Tracking for ' + T.[Schema] + '.' + T.[Name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' SET (SYSTEM_VERSIONING = OFF);' + CHAR(13) + CHAR(10) +
+                                                             'ALTER TABLE ' + T.[Schema] + '.' + T.[Name] + ' DROP PERIOD FOR SYSTEM_TIME;' AS NVARCHAR(MAX))
+                            FROM #Tables T WITH (NOLOCK)
+                            WHERE t.IsTemporal = 0
+                              AND OBJECTPROPERTY(OBJECT_ID([Schema] + '.' + [Name]), 'TableTemporalType') = 2
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Collect table level extended properties', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #TableProperties
+  IF OBJECT_ID('tempdb..#TableProperties') IS NOT NULL DROP TABLE #TableProperties
   SELECT [Schema], objname COLLATE DATABASE_DEFAULT AS TableName, x.[Name] COLLATE DATABASE_DEFAULT AS PropertyName, CONVERT(NVARCHAR(50), x.[value]) COLLATE DATABASE_DEFAULT AS [value]
     INTO #TableProperties
     FROM #SchemaList WITH (NOLOCK)
@@ -227,11 +238,12 @@ BEGIN TRY
     WHERE x.[Name] COLLATE DATABASE_DEFAULT = 'ProductName'
   
   RAISERROR('Validate Table Ownership', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Table ' + tp.[Schema] + '.' + tp.[TableName] + ' owned by different product. [' + tp.[Value] + ']'', 10, 1) WITH NOWAIT;' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Tables t WITH (NOLOCK)
-    JOIN #TableProperties tp WITH (NOLOCK) ON t.[Schema] = tp.[Schema]
-                                          AND SchemaSmith.fn_StripBracketWrapping(t.[Name]) = tp.TableName
-    WHERE tp.[value] <> @ProductName
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Table ' + tp.[Schema] + '.' + tp.[TableName] + ' owned by different product. [' + tp.[Value] + ']'', 10, 1) WITH NOWAIT;' AS NVARCHAR(MAX))
+                            FROM #Tables t WITH (NOLOCK)
+                            JOIN #TableProperties tp WITH (NOLOCK) ON t.[Schema] = tp.[Schema]
+                                                                  AND SchemaSmith.fn_StripBracketWrapping(t.[Name]) = tp.TableName
+                            WHERE tp.[value] <> @ProductName
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   IF EXISTS (SELECT *
@@ -246,7 +258,7 @@ BEGIN TRY
   IF @DropTablesRemovedFromProduct = 1
   BEGIN
     RAISERROR('Identify tables removed from the product', 10, 1) WITH NOWAIT
-    DROP TABLE IF EXISTS #TablesRemovedFromProduct
+    IF OBJECT_ID('tempdb..#TablesRemovedFromProduct') IS NOT NULL DROP TABLE #TablesRemovedFromProduct
     SELECT tp.[Schema], tp.TableName
       INTO #TablesRemovedFromProduct
       FROM #TableProperties tp WITH (NOLOCK)
@@ -259,15 +271,16 @@ BEGIN TRY
     IF EXISTS (SELECT * FROM #TablesRemovedFromProduct WITH (NOLOCK))
     BEGIN
       RAISERROR('Drop tables removed from the product', 10, 1) WITH NOWAIT
-      SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping table ' + t.[Schema] + '.' + t.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                      'DROP TABLE IF EXISTS ' + t.[Schema] + '.[' + t.[TableName] + '];' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-        FROM #TablesRemovedFromProduct t WITH (NOLOCK)
+      SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping table ' + t.[Schema] + '.' + t.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                                 'IF OBJECT_ID(''' + t.[Schema] + '.[' + t.[TableName] + ']'', ''U'') IS NOT NULL DROP TABLE ' + t.[Schema] + '.[' + t.[TableName] + '];' AS NVARCHAR(MAX))
+                                FROM #TablesRemovedFromProduct t WITH (NOLOCK)
+                                FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
       IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
     END
   END
   
   RAISERROR('Collect index level extended properties', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexProperties
+  IF OBJECT_ID('tempdb..#IndexProperties') IS NOT NULL DROP TABLE #IndexProperties
   SELECT t.[Schema], t.[Name] AS TableName, objname COLLATE DATABASE_DEFAULT AS IndexName, x.[Name] COLLATE DATABASE_DEFAULT AS PropertyName, CONVERT(NVARCHAR(50), x.[value]) COLLATE DATABASE_DEFAULT AS [value]
     INTO #IndexProperties
     FROM #Tables t WITH (NOLOCK)
@@ -275,7 +288,7 @@ BEGIN TRY
     WHERE x.[Name] COLLATE DATABASE_DEFAULT = 'ProductName'
   
   RAISERROR('Identify indexes removed from the product', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexesRemovedFromProduct
+  IF OBJECT_ID('tempdb..#IndexesRemovedFromProduct') IS NOT NULL DROP TABLE #IndexesRemovedFromProduct
   SELECT xp.[Schema], xp.TableName, xp.IndexName, IsConstraint = CAST(CASE WHEN OBJECT_ID(xp.[Schema] + '.' + xp.IndexName) IS NOT NULL THEN 1 ELSE 0 END AS BIT)
     INTO #IndexesRemovedFromProduct
     FROM #IndexProperties xp WITH (NOLOCK)
@@ -292,7 +305,7 @@ BEGIN TRY
                           AND SchemaSmith.fn_StripBracketWrapping(i.IndexName) = xp.IndexName)
 
   RAISERROR('Detect Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ColumnChanges
+  IF OBJECT_ID('tempdb..#ColumnChanges') IS NOT NULL DROP TABLE #ColumnChanges
   SELECT c.[Schema], c.[TableName], c.[ColumnName],
          -- For computed columns, only the expression is needed
          CASE WHEN RTRIM(ISNULL([ComputedExpression], '')) <> '' 
@@ -388,7 +401,7 @@ BEGIN TRY
         AND NOT (t.IsTemporal = 1 AND COLUMN_NAME IN ('ValidFrom', 'ValidTo'))
   
   RAISERROR('Collect Foreign Keys To Drop', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #FKsToDrop
+  IF OBJECT_ID('tempdb..#FKsToDrop') IS NOT NULL DROP TABLE #FKsToDrop
   SELECT t.[Schema], [TableName] = t.[Name], [FKName] = fk.[Name]
     INTO #FKsToDrop
     FROM #Tables t WITH (NOLOCK)
@@ -396,13 +409,15 @@ BEGIN TRY
     WHERE NOT EXISTS (SELECT * FROM #ForeignKeys fk2 WITH (NOLOCK) WHERE t.[Schema] = fk2.[Schema] AND t.[Name] = fk2.[TableName] AND fk.[name] = SchemaSmith.fn_StripBracketWrapping(fk2.[KeyName]))
 
   RAISERROR('Drop Foreign Keys No Longer Defined In The Product', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'ALTER TABLE ' + df.[Schema] + '.' + df.[TableName] + ' DROP CONSTRAINT IF EXISTS ' + df.[FKName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #FKsToDrop df WITH (NOLOCK)
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + df.[Schema] + '.' + df.[TableName] + '.' + df.[FKName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'IF EXISTS (SELECT * FROM sys.foreign_keys WHERE [name] = ''' + SchemaSmith.fn_StripBracketWrapping(df.[FKName]) + ''' AND parent_object_id = OBJECT_ID(''' + df.[Schema] + '.' + df.[TableName] + ''')) ' +
+                                                             'ALTER TABLE ' + df.[Schema] + '.' + df.[TableName] + ' DROP CONSTRAINT ' + df.[FKName] + ';' AS NVARCHAR(MAX))
+                            FROM #FKsToDrop df WITH (NOLOCK)
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Identify Fulltext Indexes To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #FTIndexesToDropForChanges
+  IF OBJECT_ID('tempdb..#FTIndexesToDropForChanges') IS NOT NULL DROP TABLE #FTIndexesToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName]
     INTO #FTIndexesToDropForChanges
     FROM sys.fulltext_index_columns ic WITH (NOLOCK)
@@ -410,18 +425,21 @@ BEGIN TRY
                                         AND COL_NAME(ic.[object_id], ic.column_id) = SchemaSmith.fn_StripBracketWrapping(cc.ColumnName)
   
   RAISERROR('Drop FullText Indexes Referencing Modified Columns', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping fulltext index on ' + di.[Schema] + '.' + di.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'DROP FULLTEXT INDEX ON ' + di.[Schema] + '.' + di.[TableName] + ';' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #FTIndexesToDropForChanges di WITH (NOLOCK)
-    JOIN sys.fulltext_indexes fi WITH (NOLOCK) ON fi.[object_id] = OBJECT_ID(di.[Schema] + '.' + di.[TableName])
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping fulltext index on ' + di.[Schema] + '.' + di.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'DROP FULLTEXT INDEX ON ' + di.[Schema] + '.' + di.[TableName] + ';' AS NVARCHAR(MAX))
+                            FROM #FTIndexesToDropForChanges di WITH (NOLOCK)
+                            JOIN sys.fulltext_indexes fi WITH (NOLOCK) ON fi.[object_id] = OBJECT_ID(di.[Schema] + '.' + di.[TableName])
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Collect Existing FullText Indexes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingFullTextIndexes
+  IF OBJECT_ID('tempdb..#ExistingFullTextIndexes') IS NOT NULL DROP TABLE #ExistingFullTextIndexes
   SELECT t.[Schema], [TableName] = t.[Name],
-         (SELECT STRING_AGG(CAST('[' + COL_NAME(fc.[object_id], fc.column_id) + ']' AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY COL_NAME(fc.[object_id], fc.column_id))
-            FROM sys.fulltext_index_columns fc WITH (NOLOCK)
-            WHERE fi.[object_id] = fc.[object_id]) AS [Columns],
+         STUFF((SELECT ',' + CAST('[' + COL_NAME(fc.[object_id], fc.column_id) + ']' AS NVARCHAR(MAX))
+                  FROM sys.fulltext_index_columns fc WITH (NOLOCK)
+                  WHERE fi.[object_id] = fc.[object_id]
+                  ORDER BY COL_NAME(fc.[object_id], fc.column_id)
+                  FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '') AS [Columns],
          FullTextCatalog = '[' + (SELECT c.[name] COLLATE DATABASE_DEFAULT FROM sys.fulltext_catalogs c WITH (NOLOCK) WHERE c.fulltext_catalog_id = fi.fulltext_catalog_id) + ']',
          KeyIndex = '[' + (SELECT i.[Name] COLLATE DATABASE_DEFAULT FROM sys.indexes i WITH (NOLOCK) WHERE i.[object_id] = fi.[object_id] AND i.[index_id] = fi.[unique_index_id]) + ']',
          ChangeTracking = change_tracking_state_desc COLLATE DATABASE_DEFAULT,
@@ -432,7 +450,7 @@ BEGIN TRY
     WHERE t.NewTable = 0
   
   RAISERROR('Identify Indexes To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexesToDropForColumnChanges
+  IF OBJECT_ID('tempdb..#IndexesToDropForColumnChanges') IS NOT NULL DROP TABLE #IndexesToDropForColumnChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], IndexName = i.[name],
          IsConstraint = CAST(CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN 1 ELSE 0 END AS BIT),
          IsUnique = i.is_unique,
@@ -448,30 +466,32 @@ BEGIN TRY
   
   -- Handle table compression changes
   RAISERROR('Fixup Table Compression', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering table compression for ' + t.[Schema] + '.' + t.[Name] + ' TO ' + t.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'ALTER TABLE ' + t.[Schema] + '.' + t.[Name] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + t.[CompressionType] + ');' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Tables t WITH (NOLOCK)
-    LEFT JOIN sys.partitions p WITH (NOLOCK) ON p.[object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
-                                            AND p.index_id < 2
-    WHERE t.NewTable = 0
-      AND t.[CompressionType] IN ('NONE', 'ROW', 'PAGE')
-      AND COALESCE(p.data_compression_desc COLLATE DATABASE_DEFAULT, 'NONE') <> t.[CompressionType]
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering table compression for ' + t.[Schema] + '.' + t.[Name] + ' TO ' + t.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'ALTER TABLE ' + t.[Schema] + '.' + t.[Name] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + t.[CompressionType] + ');' AS NVARCHAR(MAX))
+                            FROM #Tables t WITH (NOLOCK)
+                            LEFT JOIN sys.partitions p WITH (NOLOCK) ON p.[object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
+                                                                    AND p.index_id < 2
+                            WHERE t.NewTable = 0
+                              AND t.[CompressionType] IN ('NONE', 'ROW', 'PAGE')
+                              AND COALESCE(p.data_compression_desc COLLATE DATABASE_DEFAULT, 'NONE') <> t.[CompressionType]
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   -- Handle index compression changes
   RAISERROR('Fixup Index Compression', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Altering index compression for ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ' TO ' + i.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'ALTER INDEX ' + i.[IndexName] + ' ON ' + i.[Schema] + '.' + i.[TableName] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + i.[CompressionType] + ');' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #Indexes i WITH (NOLOCK) 
-    JOIN sys.indexes si WITH (NOLOCK) ON si.[object_id] = OBJECT_ID(i.[Schema] + '.' + i.[TableName])
-                                     AND si.[name] = SchemaSmith.fn_StripBracketWrapping(i.[IndexName])
-    LEFT JOIN sys.partitions p WITH (NOLOCK) ON p.[object_id] = si.[object_id]
-                                            AND p.index_id = si.index_id
-    WHERE COALESCE(p.data_compression_desc COLLATE DATABASE_DEFAULT, 'NONE') <> i.[CompressionType]
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Altering index compression for ' + i.[Schema] + '.' + i.[TableName] + '.' + i.[IndexName] + ' TO ' + i.[CompressionType] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'ALTER INDEX ' + i.[IndexName] + ' ON ' + i.[Schema] + '.' + i.[TableName] + ' REBUILD PARTITION=ALL WITH (DATA_COMPRESSION=' + i.[CompressionType] + ');' AS NVARCHAR(MAX))
+                            FROM #Indexes i WITH (NOLOCK) 
+                            JOIN sys.indexes si WITH (NOLOCK) ON si.[object_id] = OBJECT_ID(i.[Schema] + '.' + i.[TableName])
+                                                             AND si.[name] = SchemaSmith.fn_StripBracketWrapping(i.[IndexName])
+                            LEFT JOIN sys.partitions p WITH (NOLOCK) ON p.[object_id] = si.[object_id]
+                                                                    AND p.index_id = si.index_id
+                            WHERE COALESCE(p.data_compression_desc COLLATE DATABASE_DEFAULT, 'NONE') <> i.[CompressionType]
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Collect Existing Index Definitions', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingIndexes
+  IF OBJECT_ID('tempdb..#ExistingIndexes') IS NOT NULL DROP TABLE #ExistingIndexes
   SELECT xSchema = t.[Schema], [xTableName] = t.[Name], [xIndexName] = CAST(si.[Name] AS NVARCHAR(500)),
          IsConstraint = CAST(CASE WHEN si.is_primary_key = 1 OR si.is_unique_constraint = 1 THEN 1 ELSE 0 END AS BIT),
          IsUnique = si.is_unique, IsClustered = CAST(CASE WHEN si.[type_desc] = 'CLUSTERED' THEN 1 ELSE 0 END AS BIT), [FillFactor] = ISNULL(NULLIF(si.fill_factor, 0), 100),
@@ -481,19 +501,25 @@ BEGIN TRY
                        CASE WHEN si.[type] IN (5, 6) THEN 'COLUMNSTORE ' ELSE '' END +
                        'INDEX [' + si.[Name] + '] ON ' + t.[Schema] + '.' + t.[Name] + 
                        CASE WHEN si.[type] NOT IN (5, 6) 
-                            THEN ' (' + (SELECT STRING_AGG(CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY key_ordinal)
-                                           FROM sys.index_columns ic WITH (NOLOCK)
-                                           WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 0) + ')' +
+                            THEN ' (' + (SELECT STUFF((SELECT ',' + CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END AS NVARCHAR(MAX))
+                                                        FROM sys.index_columns ic WITH (NOLOCK)
+                                                        WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 0
+                                                        ORDER BY key_ordinal
+                                                        FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')) + ')' +
                                  CASE WHEN EXISTS (SELECT * FROM sys.index_columns ic WITH (NOLOCK) WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 1)
                                       THEN ' INCLUDE (' +
-                                           (SELECT STRING_AGG(CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY COL_NAME(ic.[object_id], ic.column_id))
-                                              FROM sys.index_columns ic WITH (NOLOCK)
-                                              WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 1) + ')'
+                                           (SELECT STUFF((SELECT ',' + CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' AS NVARCHAR(MAX))
+                                                            FROM sys.index_columns ic WITH (NOLOCK)
+                                                            WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 1
+                                                            ORDER BY COL_NAME(ic.[object_id], ic.column_id)
+                                                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')) + ')'
                                       ELSE '' END
                             WHEN si.[type] IN (6) 
-                            THEN ' (' + (SELECT STRING_AGG(CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY COL_NAME(ic.[object_id], ic.column_id))
-                                           FROM sys.index_columns ic WITH (NOLOCK)
-                                           WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 1) + ')'
+                            THEN ' (' + (SELECT STUFF((SELECT ',' + CAST('[' + COL_NAME(ic.[object_id], ic.column_id) + ']' AS NVARCHAR(MAX))
+                                                        FROM sys.index_columns ic WITH (NOLOCK)
+                                                        WHERE si.[object_id] = ic.[object_id] AND si.index_id = ic.index_id AND is_included_column = 1
+                                                        ORDER BY COL_NAME(ic.[object_id], ic.column_id)
+                                                        FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')) + ')'
                             ELSE '' END +
                        CASE WHEN si.has_filter = 1 THEN ' WHERE ' + SchemaSmith.fn_StripParenWrapping(si.filter_definition) ELSE '' END +
                        CASE WHEN (si.[type] NOT IN (5, 6) AND ISNULL(p.[data_compression_desc], 'NONE') COLLATE DATABASE_DEFAULT IN ('NONE', 'ROW', 'PAGE'))
@@ -512,7 +538,7 @@ BEGIN TRY
       AND NOT EXISTS (SELECT * FROM sys.xml_indexes xi WHERE xi.[object_id] = si.[object_id] AND xi.index_id = si.index_id)
     
   RAISERROR('Detect Index Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexChanges
+  IF OBJECT_ID('tempdb..#IndexChanges') IS NOT NULL DROP TABLE #IndexChanges
   SELECT i.[Schema], i.[TableName], i.[IndexName], ei.[IsConstraint], IsUnique = i.[Unique], IsClustered = i.[Clustered]
     INTO #IndexChanges
     FROM #ExistingIndexes ei WITH (NOLOCK)
@@ -538,7 +564,7 @@ BEGIN TRY
                                  ELSE '' END
 
   RAISERROR('Detect Index Renames', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexRenames
+  IF OBJECT_ID('tempdb..#IndexRenames') IS NOT NULL DROP TABLE #IndexRenames
   SELECT i.[Schema], i.[TableName], [NewName] = i.[IndexName], ei.[IsConstraint], IsUnique = i.[Unique], [OldName] = ei.[xIndexName]
     INTO #IndexRenames
     FROM #ExistingIndexes ei WITH (NOLOCK)
@@ -573,22 +599,25 @@ BEGIN TRY
   DELETE FROM #IndexRenames WHERE EXISTS (SELECT * FROM #IndexRenameDedupe dd WITH (NOLOCK) WHERE [OriginalName] = [OldName] AND [ValidNewName] <> [NewName])
   
   RAISERROR('Handle Renamed Indexes And Unique Constraints', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  CASE WHEN IsConstraint = 1
-                                       THEN CASE WHEN OBJECT_ID(ir.[Schema] + '.' + ir.[NewName]) IS NULL
-                                                 THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''OBJECT'';'
-                                                 ELSE 'ALTER TABLE ' + ir.[Schema] + '.' + ir.[TableName] + ' DROP CONSTRAINT IF EXISTS [' + ir.[OldName] + '];'
-                                                 END
-                                       ELSE CASE WHEN INDEXPROPERTY(OBJECT_ID(ir.[Schema] + '.' + ir.[TableName]), SchemaSmith.fn_StripBracketWrapping(ir.[NewName]), 'IndexID') IS NULL
-                                                 THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(ir.[TableName]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''INDEX'';'
-                                                 ELSE 'DROP INDEX IF EXISTS [' + ir.[OldName] + '] ON ' + ir.[Schema] + '.' + ir.[TableName] + ';'
-                                                 END
-                                       END AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #IndexRenames ir WITH (NOLOCK)
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             CASE WHEN IsConstraint = 1
+                                                                  THEN CASE WHEN OBJECT_ID(ir.[Schema] + '.' + ir.[NewName]) IS NULL
+                                                                            THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''OBJECT'';'
+                                                                            ELSE 'IF EXISTS (SELECT * FROM sys.objects WHERE [name] = ''' + ir.[OldName] + ''' AND parent_object_id = OBJECT_ID(''' + ir.[Schema] + '.' + ir.[TableName] + ''')) ' +
+                                                                                 'ALTER TABLE ' + ir.[Schema] + '.' + ir.[TableName] + ' DROP CONSTRAINT [' + ir.[OldName] + '];'
+                                                                            END
+                                                                  ELSE CASE WHEN INDEXPROPERTY(OBJECT_ID(ir.[Schema] + '.' + ir.[TableName]), SchemaSmith.fn_StripBracketWrapping(ir.[NewName]), 'IndexID') IS NULL
+                                                                            THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(ir.[TableName]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''INDEX'';'
+                                                                            ELSE 'IF EXISTS (SELECT * FROM sys.indexes WHERE [name] = ''' + SchemaSmith.fn_StripBracketWrapping(ir.[OldName]) + ''' AND [object_id] = OBJECT_ID(''' + ir.[Schema] + '.' + ir.[TableName] + ''')) ' +
+                                                                                 'DROP INDEX [' + ir.[OldName] + '] ON ' + ir.[Schema] + '.' + ir.[TableName] + ';'
+                                                                            END
+                                                                  END AS NVARCHAR(MAX))
+                            FROM #IndexRenames ir WITH (NOLOCK)
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Collect Existing XML Index Definitions', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingXmlIndexes
+  IF OBJECT_ID('tempdb..#ExistingXmlIndexes') IS NOT NULL DROP TABLE #ExistingXmlIndexes
   SELECT xSchema = t.[Schema], [xTableName] = t.[Name], [xIndexName] = CAST(i.[Name] COLLATE DATABASE_DEFAULT AS NVARCHAR(500)),
          IndexScript = 'CREATE ' + CASE WHEN i.xml_index_type = 0 THEN 'PRIMARY ' ELSE '' END + 
                        'XML INDEX [' + i.[name] COLLATE DATABASE_DEFAULT + '] ON [' + OBJECT_SCHEMA_NAME(i.[object_id]) + '].[' + OBJECT_NAME(i.[object_id]) + '] ' + 
@@ -604,7 +633,7 @@ BEGIN TRY
     WHERE t.NewTable = 0
 
   RAISERROR('Detect Xml Index Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #XmlIndexChanges
+  IF OBJECT_ID('tempdb..#XmlIndexChanges') IS NOT NULL DROP TABLE #XmlIndexChanges
   SELECT i.[Schema], i.[TableName], i.[IndexName]
     INTO #XmlIndexChanges
     FROM #ExistingXmlIndexes ei WITH (NOLOCK)
@@ -622,7 +651,7 @@ BEGIN TRY
                                  ELSE '' END
   
   RAISERROR('Detect Xml Index Renames', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #XmlIndexRenames
+  IF OBJECT_ID('tempdb..#XmlIndexRenames') IS NOT NULL DROP TABLE #XmlIndexRenames
   SELECT i.[Schema], i.[TableName], [NewName] = i.[IndexName], [OldName] = ei.[xIndexName]
     INTO #XmlIndexRenames
     FROM #ExistingXmlIndexes ei WITH (NOLOCK)
@@ -642,16 +671,18 @@ BEGIN TRY
                                                                        ELSE '' END
 
   RAISERROR('Handle Renamed Xml Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  CASE WHEN INDEXPROPERTY(OBJECT_ID(ir.[Schema] + '.' + ir.[TableName]), SchemaSmith.fn_StripBracketWrapping(ir.[NewName]), 'IndexID') IS NULL
-                                       THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(ir.[TableName]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''INDEX'';'
-                                       ELSE 'DROP INDEX IF EXISTS [' + ir.[OldName] + '] ON ' + ir.[Schema] + '.' + ir.[TableName] + ';'
-                                       END AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #XmlIndexRenames ir WITH (NOLOCK)
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Renaming ' + [OldName] + ' to ' + [NewName] + ' ON ' + ir.[Schema] + '.' + ir.[TableName] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             CASE WHEN INDEXPROPERTY(OBJECT_ID(ir.[Schema] + '.' + ir.[TableName]), SchemaSmith.fn_StripBracketWrapping(ir.[NewName]), 'IndexID') IS NULL
+                                                                  THEN 'EXEC sp_rename N''' + SchemaSmith.fn_StripBracketWrapping(ir.[Schema]) + '.' + SchemaSmith.fn_StripBracketWrapping(ir.[TableName]) + '.' + ir.[OldName] + ''', N''' + SchemaSmith.fn_StripBracketWrapping(ir.[NewName]) + ''', N''INDEX'';'
+                                                                  ELSE 'IF EXISTS (SELECT * FROM sys.indexes WHERE [name] = ''' + SchemaSmith.fn_StripBracketWrapping(ir.[OldName]) + ''' AND [object_id] = OBJECT_ID(''' + ir.[Schema] + '.' + ir.[TableName] + ''')) ' +
+                                                                       'DROP INDEX [' + ir.[OldName] + '] ON ' + ir.[Schema] + '.' + ir.[TableName] + ';'
+                                                                  END AS NVARCHAR(MAX))
+                            FROM #XmlIndexRenames ir WITH (NOLOCK)
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Identify unknown and modified indexes to drop', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #IndexesToDrop
+  IF OBJECT_ID('tempdb..#IndexesToDrop') IS NOT NULL DROP TABLE #IndexesToDrop
   SELECT [Schema] = CAST([Schema] AS NVARCHAR(500)), [TableName] = CAST([TableName] AS NVARCHAR(500)), 
          [IndexName] = CAST(SchemaSmith.fn_StripBracketWrapping([IndexName]) AS NVARCHAR(500)), [IsConstraint], [IsUnique] = i.[is_unique], 
          [IsClustered] = CAST(CASE WHEN i.[type_desc] = 'CLUSTERED' THEN 1 ELSE 0 END AS BIT)
@@ -686,11 +717,13 @@ BEGIN TRY
         AND NOT EXISTS (SELECT * FROM #IndexesToDrop id WITH (NOLOCK) WHERE [xSchema] = [Schema] AND [xTableName] = [TableName] AND [xIndexName] = [IndexName])
 
   RAISERROR('Drop Referencing Foreign Keys When Dropping Unique Indexes', 10, 1) WITH NOWAIT
-  SELECT @v_SQL = STRING_AGG(CAST('RAISERROR(''  Dropping foreign Key ' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) + '.' + fk.[name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
-                                  'ALTER TABLE [' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] DROP CONSTRAINT IF EXISTS [' + fk.[name] + '];' AS NVARCHAR(MAX)), CHAR(13) + CHAR(10))
-    FROM #IndexesToDrop di WITH (NOLOCK)
-    JOIN sys.foreign_keys fk WITH (NOLOCK) ON fk.referenced_object_id = OBJECT_ID(di.[Schema] + '.' + di.[TableName])
-    WHERE IsConstraint = 1 OR IsUnique = 1
+  SELECT @v_SQL = STUFF((SELECT CHAR(13) + CHAR(10) + CAST('RAISERROR(''  Dropping foreign Key ' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) + '.' + fk.[name] + ''', 10, 1) WITH NOWAIT;' + CHAR(13) + CHAR(10) +
+                                                             'IF EXISTS (SELECT * FROM sys.foreign_keys WHERE [name] = ''' + fk.[name] + ''' AND parent_object_id = ' + CONVERT(VARCHAR(20), fk.parent_object_id) + ') ' +
+                                                             'ALTER TABLE [' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] DROP CONSTRAINT [' + fk.[name] + '];' AS NVARCHAR(MAX))
+                            FROM #IndexesToDrop di WITH (NOLOCK)
+                            JOIN sys.foreign_keys fk WITH (NOLOCK) ON fk.referenced_object_id = OBJECT_ID(di.[Schema] + '.' + di.[TableName])
+                            WHERE IsConstraint = 1 OR IsUnique = 1
+                            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Drop FullText Indexes Referencing Unique Indexes That Will Be Dropped', 10, 1) WITH NOWAIT
@@ -727,7 +760,7 @@ BEGIN TRY
   END
   
   RAISERROR('Identify Statistics To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #StatisticsToDropForChanges
+  IF OBJECT_ID('tempdb..#StatisticsToDropForChanges') IS NOT NULL DROP TABLE #StatisticsToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], [StatName] = i.[name]
     INTO #StatisticsToDropForChanges
     FROM sys.stats i WITH (NOLOCK) 
@@ -745,7 +778,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
 
   RAISERROR('Identify Foreign Keys To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #FKsToDropForChanges
+  IF OBJECT_ID('tempdb..#FKsToDropForChanges') IS NOT NULL DROP TABLE #FKsToDropForChanges
   SELECT DISTINCT cc.[Schema], cc.[TableName], FKName = fk.[name]
     INTO #FKsToDropForChanges
     FROM sys.foreign_key_columns fc WITH (NOLOCK)
@@ -762,7 +795,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Identify Defaults To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #DefaultsToDropForChanges
+  IF OBJECT_ID('tempdb..#DefaultsToDropForChanges') IS NOT NULL DROP TABLE #DefaultsToDropForChanges
   SELECT cc.[Schema], cc.[TableName], DefaultName = dc.[name]
     INTO #DefaultsToDropForChanges
     FROM sys.default_constraints dc WITH (NOLOCK)
@@ -776,7 +809,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Identify Check Constraints To Drop Based On Column Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ChecksToDropForChanges
+  IF OBJECT_ID('tempdb..#ChecksToDropForChanges') IS NOT NULL DROP TABLE #ChecksToDropForChanges
   SELECT cc.[Schema], cc.[TableName], CheckName = ck.[name]
     INTO #ChecksToDropForChanges
     FROM sys.check_constraints ck WITH (NOLOCK)
@@ -849,7 +882,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Detect Default Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #DefaultChanges
+  IF OBJECT_ID('tempdb..#DefaultChanges') IS NOT NULL DROP TABLE #DefaultChanges
   SELECT C.[Schema], C.[TableName], C.[ColumnName],
          [DefaultName] = (SELECT [Name] 
                             FROM sys.default_constraints dc WITH (NOLOCK)
@@ -873,7 +906,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Collect Existing Foreign Keys', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingFKs
+  IF OBJECT_ID('tempdb..#ExistingFKs') IS NOT NULL DROP TABLE #ExistingFKs
   SELECT t.[Schema], [TableName] = t.[Name],
          FKName = fk.[Name],
          FKScript = '(' + (SELECT STRING_AGG(CAST('[' + COL_NAME(fc.[parent_object_id], fc.parent_column_id) + ']' AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY fc.constraint_column_id)
@@ -891,7 +924,7 @@ BEGIN TRY
     WHERE t.NewTable = 0
 
   RAISERROR('Detect Foreign Key Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #FKChanges
+  IF OBJECT_ID('tempdb..#FKChanges') IS NOT NULL DROP TABLE #FKChanges
   SELECT ek.[Schema], ek.[TableName], ek.[FKName]
     INTO #FKChanges
     FROM #ExistingFKs ek WITH (NOLOCK)
@@ -909,7 +942,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Collect Existing Statistics Definitions', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingStats
+  IF OBJECT_ID('tempdb..#ExistingStats') IS NOT NULL DROP TABLE #ExistingStats
   SELECT t.[Schema], [TableName] = t.[Name], [StatsName] = si.[Name],
          StatisticScript = 'CREATE STATISTICS ' +
                            '[' + si.[Name] + '] ON ' + t.[Schema] + '.' + t.[Name] + ' (' +
@@ -928,7 +961,7 @@ BEGIN TRY
     WHERE t.NewTable = 0
   
   RAISERROR('Detect Statistics Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #StatsChanges
+  IF OBJECT_ID('tempdb..#StatsChanges') IS NOT NULL DROP TABLE #StatsChanges
   SELECT s.[Schema], s.[TableName], s.[StatisticName]
     INTO #StatsChanges
     FROM #Statistics s WITH (NOLOCK)
@@ -945,7 +978,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Collect Existing Check Constraints', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #ExistingCheckConstraints
+  IF OBJECT_ID('tempdb..#ExistingCheckConstraints') IS NOT NULL DROP TABLE #ExistingCheckConstraints
   SELECT t.[Schema], [TableName] = t.[Name], [CheckName] = ck.[name], 
          [CheckColumn] = CASE WHEN ck.parent_column_id <> 0 THEN COL_NAME(ck.parent_object_id, ck.parent_column_id) ELSE NULL END,
          [CheckDefinition] = SchemaSmith.fn_StripParenWrapping(ck.[definition])
@@ -954,7 +987,7 @@ BEGIN TRY
     JOIN sys.check_constraints ck WITH (NOLOCK) ON ck.[parent_object_id] = OBJECT_ID(t.[Schema] + '.' + t.[Name])
   
   RAISERROR('Detect Column Level Check Constraint Changes', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #CheckChanges
+  IF OBJECT_ID('tempdb..#CheckChanges') IS NOT NULL DROP TABLE #CheckChanges
   SELECT ec.[Schema], ec.[TableName], ec.[CheckName]
     INTO #CheckChanges
     FROM #ExistingCheckConstraints ec WITH (NOLOCK)
@@ -1005,7 +1038,7 @@ BEGIN TRY
   IF @WhatIf = 1 PRINT @v_SQL ELSE EXEC(@v_SQL)
   
   RAISERROR('Identify Existing Clustered Index Conflicts', 10, 1) WITH NOWAIT
-  DROP TABLE IF EXISTS #MissingClusteredIndexTables
+  IF OBJECT_ID('tempdb..#MissingClusteredIndexTables') IS NOT NULL DROP TABLE #MissingClusteredIndexTables
   SELECT DISTINCT i.[Schema], i.[TableName]
     INTO #MissingClusteredIndexTables
     FROM #Indexes i WITH (NOLOCK)

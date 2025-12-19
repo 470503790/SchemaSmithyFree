@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Data;
 using System.Threading;
+using System.Xml.Linq;
 using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json;
 using Schema.DataAccess;
 using Schema.Isolators;
 using Schema.Utility;
@@ -23,8 +25,9 @@ public class BaseTableQuenchTests
 
     protected void RunTableQuenchProc(IDbCommand cmd, string json)
     {
+        var xml = JsonConvert.DeserializeXNode($"{{\"Table\":{json}}}", "Tables")?.ToString(SaveOptions.DisableFormatting) ?? "<Tables />";
         cmd.CommandTimeout = 300;
-        cmd.CommandText = $"EXEC SchemaSmith.TableQuench @ProductName = '{_productName}', @TableDefinitions = '{json.Replace("'", "''")}', @DropTablesRemovedFromProduct = 0, @DropUnknownIndexes = 0";
+        cmd.CommandText = $"EXEC SchemaSmith.TableQuench @ProductName = '{_productName}', @TableDefinitions = N'{xml.Replace("'", "''")}', @DropTablesRemovedFromProduct = 0, @DropUnknownIndexes = 0";
         var retry = true;
         var tries = 0;
         while (retry && tries++ < 10)

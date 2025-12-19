@@ -12,6 +12,7 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using System.Xml.Serialization;
 
 namespace SchemaTongs;
 
@@ -170,48 +171,54 @@ SET QUOTED_IDENTIFIER {(function.QuotedIdentifierStatus ? "ON" : "OFF")}
 GO{(_scriptDynamicDependencyRemovalForFunctions ? @$"
 
 DECLARE @v_SearchTerm VARCHAR(2000) = '%{function.Name}%'
-DECLARE @v_SQL VARCHAR(MAX) = (SELECT STRING_AGG(Task, ';' + CHAR(13) + CHAR(10)) 
-                                 FROM (SELECT 'ALTER TABLE [' + OBJECT_SCHEMA_NAME(cc.parent_object_id) + '].[' + OBJECT_NAME(cc.parent_object_id) + '] DROP CONSTRAINT IF EXISTS [' + OBJECT_NAME(cc.[name]) + ']' AS Task
-                                         FROM sys.check_constraints cc
-                                         WHERE cc.[definition] LIKE @v_SearchTerm
-                                            OR EXISTS (SELECT *
-                                                         FROM sys.computed_columns cc2
-                                                         WHERE cc2.[definition] LIKE @v_SearchTerm
-                                                           AND cc2.[object_id] = cc.parent_object_id
-                                                           AND cc2.column_id = cc.parent_column_id)
-                                       UNION ALL
-                                       SELECT 'ALTER TABLE [' + OBJECT_SCHEMA_NAME(dc.parent_object_id) + '].[' + OBJECT_NAME(dc.parent_object_id) + '] DROP CONSTRAINT IF EXISTS [' + OBJECT_NAME(dc.[name]) + ']'
-                                         FROM sys.default_constraints dc
-                                         WHERE dc.[definition] LIKE @v_SearchTerm
-                                            OR EXISTS (SELECT *
-                                                         FROM sys.computed_columns cc
-                                                         WHERE cc.[definition] LIKE @v_SearchTerm
-                                                           AND cc.[object_id] = dc.parent_object_id
-                                                           AND cc.column_id = dc.parent_column_id)
-                                       UNION ALL
-                                       SELECT 'ALTER TABLE [' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] DROP CONSTRAINT IF EXISTS [' + OBJECT_NAME(fk.[name]) + ']'
-                                         FROM sys.foreign_keys fk
-                                         WHERE EXISTS (SELECT *
-                                                         FROM sys.computed_columns cc
-                                                         JOIN sys.foreign_key_columns fc ON fk.[object_id] = fk.[object_id]
-                                                                                        AND ((fc.parent_object_id = cc.[object_id] AND fc.parent_column_id = cc.column_id)
-                                                                                          OR (fc.referenced_object_id = cc.[object_id] AND fc.referenced_column_id = cc.column_id))
-                                                         WHERE cc.[definition] LIKE @v_SearchTerm)
-                                       UNION ALL
-                                       SELECT 'DROP INDEX IF EXISTS [' + si.[name] + '] ON [' + OBJECT_SCHEMA_NAME(si.[object_id]) + '].[' + OBJECT_NAME(si.[object_id]) + ']'
-                                         FROM sys.indexes si
-                                         WHERE si.filter_definition LIKE @v_SearchTerm
-                                            OR EXISTS (SELECT *
-                                                         FROM sys.computed_columns cc
-                                                         JOIN sys.index_columns ic ON ic.[object_id] = si.[object_id]
-                                                                                  AND ic.index_id = si.index_id
-                                                                                  AND ic.column_id = cc.column_id
-                                                         WHERE cc.[definition] LIKE @v_SearchTerm
-                                                           AND cc.[object_id] = si.[object_id])
-                                       UNION ALL
-                                       SELECT 'ALTER TABLE [' + OBJECT_SCHEMA_NAME(cc.[object_id]) + '].[' + OBJECT_NAME(cc.[object_id]) + '] DROP COLUMN IF EXISTS [' + cc.[name] + ']'
-                                         FROM sys.computed_columns cc
-                                         WHERE cc.[definition] LIKE @v_SearchTerm) x) + ';'
+DECLARE @v_SQL VARCHAR(MAX) = STUFF((SELECT ';' + CHAR(13) + CHAR(10) + Task
+                                       FROM (SELECT 'IF EXISTS (SELECT * FROM sys.check_constraints WHERE [name] = ''' + OBJECT_NAME(cc.[name]) + ''' AND parent_object_id = ' + CONVERT(VARCHAR(20), cc.parent_object_id) + ') ' +
+                                                    'ALTER TABLE [' + OBJECT_SCHEMA_NAME(cc.parent_object_id) + '].[' + OBJECT_NAME(cc.parent_object_id) + '] DROP CONSTRAINT [' + OBJECT_NAME(cc.[name]) + ']' AS Task
+                                               FROM sys.check_constraints cc
+                                               WHERE cc.[definition] LIKE @v_SearchTerm
+                                                  OR EXISTS (SELECT *
+                                                               FROM sys.computed_columns cc2
+                                                               WHERE cc2.[definition] LIKE @v_SearchTerm
+                                                                 AND cc2.[object_id] = cc.parent_object_id
+                                                                 AND cc2.column_id = cc.parent_column_id)
+                                             UNION ALL
+                                             SELECT 'IF EXISTS (SELECT * FROM sys.default_constraints WHERE [name] = ''' + OBJECT_NAME(dc.[name]) + ''' AND parent_object_id = ' + CONVERT(VARCHAR(20), dc.parent_object_id) + ') ' +
+                                                    'ALTER TABLE [' + OBJECT_SCHEMA_NAME(dc.parent_object_id) + '].[' + OBJECT_NAME(dc.parent_object_id) + '] DROP CONSTRAINT [' + OBJECT_NAME(dc.[name]) + ']'
+                                               FROM sys.default_constraints dc
+                                               WHERE dc.[definition] LIKE @v_SearchTerm
+                                                  OR EXISTS (SELECT *
+                                                               FROM sys.computed_columns cc
+                                                               WHERE cc.[definition] LIKE @v_SearchTerm
+                                                                 AND cc.[object_id] = dc.parent_object_id
+                                                                 AND cc.column_id = dc.parent_column_id)
+                                             UNION ALL
+                                             SELECT 'IF EXISTS (SELECT * FROM sys.foreign_keys WHERE [name] = ''' + OBJECT_NAME(fk.[name]) + ''' AND parent_object_id = ' + CONVERT(VARCHAR(20), fk.parent_object_id) + ') ' +
+                                                    'ALTER TABLE [' + OBJECT_SCHEMA_NAME(fk.parent_object_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] DROP CONSTRAINT [' + OBJECT_NAME(fk.[name]) + ']'
+                                               FROM sys.foreign_keys fk
+                                               WHERE EXISTS (SELECT *
+                                                               FROM sys.computed_columns cc
+                                                               JOIN sys.foreign_key_columns fc ON fk.[object_id] = fk.[object_id]
+                                                                                              AND ((fc.parent_object_id = cc.[object_id] AND fc.parent_column_id = cc.column_id)
+                                                                                                OR (fc.referenced_object_id = cc.[object_id] AND fc.referenced_column_id = cc.column_id))
+                                                               WHERE cc.[definition] LIKE @v_SearchTerm)
+                                             UNION ALL
+                                             SELECT 'IF EXISTS (SELECT * FROM sys.indexes WHERE [name] = ''' + si.[name] + ''' AND [object_id] = ' + CONVERT(VARCHAR(20), si.[object_id]) + ') ' +
+                                                    'DROP INDEX [' + si.[name] + '] ON [' + OBJECT_SCHEMA_NAME(si.[object_id]) + '].[' + OBJECT_NAME(si.[object_id]) + ']'
+                                               FROM sys.indexes si
+                                               WHERE si.filter_definition LIKE @v_SearchTerm
+                                                  OR EXISTS (SELECT *
+                                                               FROM sys.computed_columns cc
+                                                               JOIN sys.index_columns ic ON ic.[object_id] = si.[object_id]
+                                                                                        AND ic.index_id = si.index_id
+                                                                                        AND ic.column_id = cc.column_id
+                                                               WHERE cc.[definition] LIKE @v_SearchTerm
+                                                                 AND cc.[object_id] = si.[object_id])
+                                             UNION ALL
+                                             SELECT 'IF EXISTS (SELECT * FROM sys.columns WHERE [name] = ''' + cc.[name] + ''' AND [object_id] = ' + CONVERT(VARCHAR(20), cc.[object_id]) + ') ' +
+                                                    'ALTER TABLE [' + OBJECT_SCHEMA_NAME(cc.[object_id]) + '].[' + OBJECT_NAME(cc.[object_id]) + '] DROP COLUMN [' + cc.[name] + ']'
+                                               FROM sys.computed_columns cc
+                                               WHERE cc.[definition] LIKE @v_SearchTerm) x
+                                       FOR XML PATH(''), TYPE).value('.', 'VARCHAR(MAX)'), 1, 3, '') + ';'
 EXEC(@v_SQL) -- Remove any dependencies before updating the function
 GO" : "")}
 {function.ScriptHeader(ScriptNameObjectBase.ScriptHeaderType.ScriptHeaderForCreateOrAlter)}
@@ -334,21 +341,25 @@ SELECT TABLE_SCHEMA, TABLE_NAME
         {
             if (_objectsToCast.Length > 0 && !_objectsToCast.Contains($"{reader["TABLE_NAME"]}".ToLower()) && !_objectsToCast.Contains($"{reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}".ToLower())) continue;
 
-            _progressLog.Info($"  Cast Json for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
+            _progressLog.Info($"  Cast table definition for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
             commandJson.CommandText = $"EXEC SchemaSmith.GenerateTableJSON @p_Schema = '{reader["TABLE_SCHEMA"]}', @p_Table = '{reader["TABLE_NAME"]}'";
 
-            using var jsonReader = commandJson.ExecuteReader();
-            var json = "";
-            while (jsonReader.Read())
-                json += $"{jsonReader[0]}\r\n";
-            if (string.IsNullOrWhiteSpace(json) || json.Trim().Equals("{}"))
+            var tableXml = commandJson.ExecuteScalar()?.ToString();
+            if (string.IsNullOrWhiteSpace(tableXml))
             {
-                _progressLog.Error($"    No json returned for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
+                _progressLog.Error($"    No xml returned for {reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}");
                 continue;
             }
 
             var filename = Path.Combine(tableDir, $"{reader["TABLE_SCHEMA"]}.{reader["TABLE_NAME"]}.json");
             _progressLog.Info($"    Casting {filename}");
+            var serializer = new XmlSerializer(typeof(Schema.Domain.Table));
+            Schema.Domain.Table table;
+            using (var stringReader = new StringReader(tableXml))
+            {
+                table = (Schema.Domain.Table)serializer.Deserialize(stringReader);
+            }
+            var json = JsonConvert.SerializeObject(table, Formatting.Indented);
             _ = JsonConvert.DeserializeObject<Schema.Domain.Table>(json); // make sure the json is valid
             FileWrapper.GetFromFactory().WriteAllText(filename, json);
         }

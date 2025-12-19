@@ -1,9 +1,10 @@
 ﻿using System.Data;
 using System;
+using System.IO;
+using System.Xml.Serialization;
 using Schema.DataAccess;
 using Schema.Domain;
 using Schema.Utility;
-using Newtonsoft.Json;
 using Index = Schema.Domain.Index;
 
 namespace SchemaTongs.IntegrationTests;
@@ -383,23 +384,18 @@ CREATE TABLE dbo.TestColumns (
         Assert.That(column.CheckExpression, Is.EqualTo(check), $"Check of {name}");
     }
 
-    private string GenerateTableJson(IDbCommand cmd, string schema, string table)
+    private string GenerateTableXml(IDbCommand cmd, string schema, string table)
     {
         cmd.CommandText = $"EXEC [SchemaSmith].GenerateTableJson @p_Schema = '{schema}', @p_Table = '{table}'";
-        using var reader = cmd.ExecuteReader();
-
-        var tableJson = string.Empty;
-        while (reader.Read())
-        {
-            tableJson += $"{reader.GetString(0)}\r\n";
-        }
-
-        return tableJson;
+        return cmd.ExecuteScalar()?.ToString();
     }
 
     private Table GenerateTable(IDbCommand cmd, string schema, string table)
     {
-        return JsonConvert.DeserializeObject<Table>(GenerateTableJson(cmd, schema, table));
+        var tableXml = GenerateTableXml(cmd, schema, table);
+        var serializer = new XmlSerializer(typeof(Table));
+        using var stringReader = new StringReader(tableXml);
+        return (Table)serializer.Deserialize(stringReader);
     }
 
     [OneTimeTearDown]

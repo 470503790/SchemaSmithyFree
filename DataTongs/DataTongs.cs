@@ -75,23 +75,19 @@ public class DataTongs
 
     private static string BuildMergeSql(IDbCommand cmd, string tableSchema, string tableName, string? tableData, string matchColumns, bool disableTriggers, bool mergeUpdate, bool mergeDelete, string? filter)
     {
-        var fromJsonSelectColumns = GetFromJsonSelectColumns(cmd, tableSchema, tableName);
+        var fromXmlSelectColumns = GetFromXmlSelectColumns(cmd, tableSchema, tableName);
         var insertColumns = GetInsertColumns(cmd, tableSchema, tableName);
         var identityInsert = CheckIdentityInsertRequired(cmd, tableSchema, tableName);
-        var jsonColumns = GetJsonColumns(cmd, tableSchema, tableName);
 
         var mergeSQL = $@"
-DECLARE @v_json NVARCHAR(MAX) = '{tableData?.Replace("'", "''")}';
+DECLARE @v_xml XML = N'{tableData?.Replace("'", "''")}';
 
 {(disableTriggers ? $"ALTER TABLE [{tableSchema}].[{tableName}] DISABLE TRIGGER ALL;" : "")}
 {(identityInsert ? $"SET IDENTITY_INSERT [{tableSchema}].[{tableName}] ON;" : "")} 
 MERGE INTO [{tableSchema}].[{tableName}] AS Target
 USING (
-  SELECT {fromJsonSelectColumns}
-    FROM OPENJSON(@v_json)
-    WITH (
-{jsonColumns}
-    )
+  SELECT {fromXmlSelectColumns}
+    FROM @v_xml.nodes('/rows/row') AS x([Row])
 ) AS Source
 ON {matchColumns}
 ";
@@ -148,38 +144,7 @@ SELECT {selectColumns}
   FROM [{tableSchema}].[{tableName}] WITH (NOLOCK) 
   {(string.IsNullOrWhiteSpace(filter) ? "" : $"WHERE {filter}")}
   ORDER BY {orderColumns}
-  FOR JSON AUTO) AS NVARCHAR(MAX))
-";
-        return cmd.ExecuteScalar()?.ToString()!.Replace("},{", "},\r\n{").Replace("[{", "[\r\n{").Replace("}]", "}\r\n]");
-    }
-
-    private static string? GetJsonColumns(IDbCommand cmd, string tableSchema, string tableName)
-    {
-        cmd.CommandText = $@"
-SELECT STRING_AGG('           [' + c.COLUMN_NAME + '] ' + 
-       REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(USER_TYPE), 'HIERARCHYID', 'NVARCHAR(4000)'), 'GEOGRAPHY', 'NVARCHAR(4000)'), 'NTEXT', 'NVARCHAR(MAX)'), 'TEXT', 'VARCHAR(MAX)'), 'IMAGE', 'VARBINARY(MAX)') + 
-           CASE WHEN USER_TYPE LIKE '%CHAR' OR USER_TYPE LIKE '%BINARY'
-                THEN '(' + CASE WHEN CHARACTER_MAXIMUM_LENGTH = -1 THEN 'MAX' ELSE CONVERT(NVARCHAR(20), CHARACTER_MAXIMUM_LENGTH) END + ')'
-                                WHEN USER_TYPE IN ('NUMERIC', 'DECIMAL')
-                                THEN  '(' + CONVERT(NVARCHAR(20), NUMERIC_PRECISION) + ', ' + CONVERT(NVARCHAR(20), NUMERIC_SCALE) + ')'
-                                WHEN USER_TYPE = 'DATETIME2'
-                                THEN  '(' + CONVERT(NVARCHAR(20), DATETIME_PRECISION) + ')'
-                                WHEN USER_TYPE = 'XML' AND sc.xml_collection_id <> 0
-                                THEN  '([' + SCHEMA_NAME(xc.[schema_id]) + '].[' + xc.[name] + '])'
-                                ELSE '' END +
-           CASE WHEN USER_TYPE = 'GEOGRAPHY' THEN ', [' + c.COLUMN_NAME + '.STSrid] INT' ELSE '' END, ',' + CHAR(13) + CHAR(10)) WITHIN GROUP (ORDER BY c.COLUMN_NAME)
-  FROM INFORMATION_SCHEMA.COLUMNS c
-  JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
-  JOIN (SELECT CASE WHEN SCHEMA_NAME(st.[schema_id]) IN ('sys', 'dbo')
-                    THEN '' ELSE SCHEMA_NAME(st.[schema_id]) + '.' END + st.[name] AS USER_TYPE, st.user_type_id
-          FROM sys.types st WITH (NOLOCK)) st ON st.user_type_id = sc.user_type_id
-  LEFT JOIN sys.xml_schema_collections xc WITH (NOLOCK) ON xc.xml_collection_id = sc.xml_collection_id
-  LEFT JOIN sys.identity_columns ident WITH (NOLOCK) ON ident.[Name] = COLUMN_NAME
-                                                    AND ident.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
-                                                 AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
-    AND cc.[name] IS NULL
+  FOR XML PATH('row'), ROOT('rows'), TYPE) AS NVARCHAR(MAX))
 ";
         return cmd.ExecuteScalar()?.ToString();
     }
@@ -196,16 +161,18 @@ SELECT CAST(CASE WHEN EXISTS (SELECT * FROM sys.identity_columns WITH (NOLOCK) W
     private static string? GetInsertColumns(IDbCommand cmd, string tableSchema, string tableName)
     {
         cmd.CommandText = $@"
-SELECT STRING_AGG('        [' + c.COLUMN_NAME + ']', ',' + CHAR(13) + CHAR(10)) WITHIN GROUP (ORDER BY c.COLUMN_NAME)
-  FROM INFORMATION_SCHEMA.COLUMNS c
-  JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
-  LEFT JOIN sys.identity_columns ident WITH (NOLOCK) ON ident.[Name] = COLUMN_NAME
-                                                    AND ident.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
-                                                 AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
-    AND cc.[name] IS NULL
-    AND sc.is_rowguidcol = 0
+SELECT STUFF((SELECT ',' + CHAR(13) + CHAR(10) + '        [' + c.COLUMN_NAME + ']'
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
+                LEFT JOIN sys.identity_columns ident WITH (NOLOCK) ON ident.[Name] = COLUMN_NAME
+                                                            AND ident.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
+                                                           AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
+                  AND cc.[name] IS NULL
+                  AND sc.is_rowguidcol = 0
+                ORDER BY c.COLUMN_NAME
+                FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 3, '')
 ";
         return cmd.ExecuteScalar()?.ToString();
     }
@@ -213,40 +180,59 @@ SELECT STRING_AGG('        [' + c.COLUMN_NAME + ']', ',' + CHAR(13) + CHAR(10)) 
     private static string? GetUpdateColumns(IDbCommand cmd, string tableSchema, string tableName)
     {
         cmd.CommandText = $@"
-SELECT STRING_AGG(CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' THEN 'G' 
-                       WHEN c.DATA_TYPE = 'XML' THEN 'X' 
-                       WHEN c.DATA_TYPE = 'NTEXT' THEN 'N' 
-                       WHEN c.DATA_TYPE = 'TEXT' THEN 'T' 
-                       WHEN c.DATA_TYPE = 'IMAGE' THEN 'I' 
-                       ELSE '' END + 
-                  '[' + c.COLUMN_NAME + ']', ',') WITHIN GROUP (ORDER BY c.COLUMN_NAME)
-  FROM INFORMATION_SCHEMA.COLUMNS c
-  JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
-  LEFT JOIN sys.identity_columns ident WITH (NOLOCK) ON ident.[Name] = COLUMN_NAME
-                                                    AND ident.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
-                                                 AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
-    AND ident.[Name] IS NULL
-    AND cc.[name] IS NULL
-    AND sc.is_rowguidcol = 0
+SELECT STUFF((SELECT ',' + CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' THEN 'G' 
+                                 WHEN c.DATA_TYPE = 'XML' THEN 'X' 
+                                 WHEN c.DATA_TYPE = 'NTEXT' THEN 'N' 
+                                 WHEN c.DATA_TYPE = 'TEXT' THEN 'T' 
+                                 WHEN c.DATA_TYPE = 'IMAGE' THEN 'I' 
+                                 ELSE '' END + 
+                            '[' + c.COLUMN_NAME + ']'
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
+                LEFT JOIN sys.identity_columns ident WITH (NOLOCK) ON ident.[Name] = COLUMN_NAME
+                                                                AND ident.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
+                                                           AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
+                  AND ident.[Name] IS NULL
+                  AND cc.[name] IS NULL
+                  AND sc.is_rowguidcol = 0
+                ORDER BY c.COLUMN_NAME
+                FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
 ";
         return cmd.ExecuteScalar()?.ToString();
     }
 
-    private static string? GetFromJsonSelectColumns(IDbCommand cmd, string tableSchema, string tableName)
+    private static string? GetFromXmlSelectColumns(IDbCommand cmd, string tableSchema, string tableName)
     {
         cmd.CommandText = $@"
-SELECT STRING_AGG(CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' 
-                      THEN 'geography::STGeomFromText([' + c.COLUMN_NAME + '], [' + c.COLUMN_NAME + '.STSrid]) AS [' + c.COLUMN_NAME + ']'
-                      ELSE '[' + c.COLUMN_NAME + ']' END, ',') WITHIN GROUP (ORDER BY c.COLUMN_NAME)
-  FROM INFORMATION_SCHEMA.COLUMNS c
-  JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
-  LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
-                                                 AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
-    AND cc.[name] IS NULL
-    AND sc.is_rowguidcol = 0
+SELECT STUFF((SELECT ', ' + CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' 
+                                 THEN 'geography::STGeomFromText(x.[Row].value(''(' + c.COLUMN_NAME + '/text())[1]'', ''NVARCHAR(MAX)''), x.[Row].value(''(' + c.COLUMN_NAME + '_STSrid/text())[1]'', ''INT'')) AS [' + c.COLUMN_NAME + ']'
+                                 ELSE 'x.[Row].value(''(' + c.COLUMN_NAME + '/text())[1]'', ''' +
+                                      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(st.USER_TYPE), 'HIERARCHYID', 'NVARCHAR(4000)'), 'GEOGRAPHY', 'NVARCHAR(4000)'), 'NTEXT', 'NVARCHAR(MAX)'), 'TEXT', 'VARCHAR(MAX)'), 'IMAGE', 'VARBINARY(MAX)') + 
+                                      CASE WHEN st.USER_TYPE LIKE '%CHAR' OR st.USER_TYPE LIKE '%BINARY'
+                                           THEN '(' + CASE WHEN CHARACTER_MAXIMUM_LENGTH = -1 THEN 'MAX' ELSE CONVERT(NVARCHAR(20), CHARACTER_MAXIMUM_LENGTH) END + ')'
+                                           WHEN st.USER_TYPE IN ('NUMERIC', 'DECIMAL')
+                                           THEN  '(' + CONVERT(NVARCHAR(20), NUMERIC_PRECISION) + ', ' + CONVERT(NVARCHAR(20), NUMERIC_SCALE) + ')'
+                                           WHEN st.USER_TYPE = 'DATETIME2'
+                                           THEN  '(' + CONVERT(NVARCHAR(20), DATETIME_PRECISION) + ')'
+                                           WHEN st.USER_TYPE = 'XML' AND sc.xml_collection_id <> 0
+                                           THEN  '([' + SCHEMA_NAME(xc.[schema_id]) + '].[' + xc.[name] + '])'
+                                           ELSE '' END +
+                                      ''') AS [' + c.COLUMN_NAME + ']' END
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
+                JOIN (SELECT CASE WHEN SCHEMA_NAME(st.[schema_id]) IN ('sys', 'dbo')
+                                  THEN '' ELSE SCHEMA_NAME(st.[schema_id]) + '.' END + st.[name] AS USER_TYPE, st.user_type_id
+                        FROM sys.types st WITH (NOLOCK)) st ON st.user_type_id = sc.user_type_id
+                LEFT JOIN sys.xml_schema_collections xc WITH (NOLOCK) ON xc.xml_collection_id = sc.xml_collection_id
+                LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
+                                                               AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
+                  AND cc.[name] IS NULL
+                  AND sc.is_rowguidcol = 0
+                ORDER BY c.COLUMN_NAME
+                FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
 ";
         return cmd.ExecuteScalar()?.ToString();
     }
@@ -254,16 +240,18 @@ SELECT STRING_AGG(CASE WHEN c.DATA_TYPE = 'GEOGRAPHY'
     private static string? GetSelectColumns(IDbCommand cmd, string tableSchema, string tableName)
     {
         cmd.CommandText = $@"
-SELECT STRING_AGG(CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' 
-                       THEN '[' + c.COLUMN_NAME + '].ToString() AS [' + c.COLUMN_NAME + '], [' + c.COLUMN_NAME + '].STSrid AS [' + c.COLUMN_NAME + '.STSrid]'
-                       ELSE '[' + c.COLUMN_NAME + ']' END, ',') WITHIN GROUP (ORDER BY c.COLUMN_NAME)
-  FROM INFORMATION_SCHEMA.COLUMNS c
-  JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
-  LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
-                                                 AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
-  WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
-    AND cc.[name] IS NULL
-	AND sc.is_rowguidcol = 0
+SELECT STUFF((SELECT ',' + CASE WHEN c.DATA_TYPE = 'GEOGRAPHY' 
+                                 THEN '[' + c.COLUMN_NAME + '].ToString() AS [' + c.COLUMN_NAME + '], [' + c.COLUMN_NAME + '].STSrid AS [' + c.COLUMN_NAME + '_STSrid]'
+                                 ELSE '[' + c.COLUMN_NAME + ']' END
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                JOIN sys.columns sc WITH (NOLOCK) ON sc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME) AND sc.[name] = C.COLUMN_NAME
+                LEFT JOIN sys.computed_columns cc WITH (NOLOCK) ON cc.[name] = c.COLUMN_NAME
+                                                           AND cc.[object_id] = OBJECT_ID(C.TABLE_SCHEMA + '.' + C.TABLE_NAME)
+                WHERE c.TABLE_SCHEMA = '{tableSchema}' AND c.TABLE_NAME = '{tableName}'
+                  AND cc.[name] IS NULL
+	              AND sc.is_rowguidcol = 0
+                ORDER BY c.COLUMN_NAME
+                FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
 ";
         return cmd.ExecuteScalar()?.ToString();
     }

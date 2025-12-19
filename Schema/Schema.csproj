@@ -19,6 +19,7 @@
     <None Remove="Scripts\Kindling_CompletedMigrations_Table.sql" />
     <None Remove="Scripts\Kindling_SchemaSmith_Schema.sql" />
     <None Remove="Scripts\SchemaSmith.fn_FormatJson.sql" />
+    <None Remove="Scripts\SchemaSmith.fn_SplitCsv.sql" />
     <None Remove="Scripts\SchemaSmith.fn_SafeBracketWrap.sql" />
     <None Remove="Scripts\SchemaSmith.fn_StripBracketWrapping.sql" />
     <None Remove="Scripts\SchemaSmith.fn_StripParenWrapping.sql" />
@@ -33,6 +34,7 @@
     <EmbeddedResource Include="Scripts\Kindling_CompletedMigrations_Table.sql" />
     <EmbeddedResource Include="Scripts\Kindling_SchemaSmith_Schema.sql" />
     <EmbeddedResource Include="Scripts\SchemaSmith.fn_FormatJson.sql" />
+    <EmbeddedResource Include="Scripts\SchemaSmith.fn_SplitCsv.sql" />
     <EmbeddedResource Include="Scripts\SchemaSmith.fn_SafeBracketWrap.sql" />
     <EmbeddedResource Include="Scripts\SchemaSmith.fn_StripBracketWrapping.sql" />
     <EmbeddedResource Include="Scripts\SchemaSmith.fn_StripParenWrapping.sql" />
