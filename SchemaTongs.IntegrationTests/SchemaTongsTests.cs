@@ -159,6 +159,39 @@ public class SchemaTongsTests
     }
 
     [Test]
+    public void ShouldIncludeDynamicDependencyRemovalForFunctions()
+    {
+        var errorLog = Substitute.For<ILog>();
+        var progressLog = Substitute.For<ILog>();
+        var environment = Substitute.For<IEnvironment>();
+        var file = Substitute.For<IFile>();
+        var directory = Substitute.For<IDirectory>();
+        lock (FactoryContainer.SharedLockObject)
+        {
+            LogFactory.Register("ErrorLog", errorLog);
+            LogFactory.Register("ProgressLog", progressLog);
+            FactoryContainer.Register(environment);
+            FactoryContainer.Register(file);
+            FactoryContainer.Register(directory);
+            var config = SetupConfig();
+            config["ShouldCast:UserDefinedFunctions"] = "true";
+            config["ShouldCast:ScriptDynamicDependencyRemovalForFunctions"] = "true";
+
+            var tongs = new SchemaTongs();
+            tongs.CastTemplate();
+
+            file.Received(1).WriteAllText(
+                Arg.Is<string>(s => s.EndsWithIgnoringCase(Path.Combine("Functions", "Test.TestFunction.sql"))),
+                Arg.Is<string>(s => s.Contains("JOIN sys.foreign_key_columns fc ON fk.[object_id] = fc.[constraint_object_id]")));
+
+            config["ShouldCast:UserDefinedFunctions"] = "false";
+            config["ShouldCast:ScriptDynamicDependencyRemovalForFunctions"] = "false";
+            FactoryContainer.Clear();
+            LogFactory.Clear();
+        }
+    }
+
+    [Test]
     public void ShouldCastUserDefinedTypes()
     {
         var errorLog = Substitute.For<ILog>();
@@ -411,6 +444,7 @@ public class SchemaTongsTests
         config["ShouldCast:StopLists"] = "false";
         config["ShouldCast:DDLTriggers"] = "false";
         config["ShouldCast:XMLSchemaCollections"] = "false";
+        config["ShouldCast:ScriptDynamicDependencyRemovalForFunctions"] = "false";
         return config;
     }
 
