@@ -5,6 +5,7 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Xml.Serialization;
 using Schema.DataAccess;
 using Schema.Domain;
 using Schema.Isolators;
@@ -66,7 +67,8 @@ public class DatabaseQuencher(string productName, Template template, string dbNa
                 }
 
                 ProgressLog("  Quenching tables");
-                command.CommandText = $"EXEC [{dbName}].SchemaSmith.TableQuench @ProductName = '{productName}', @TableDefinitions = '{template.TableSchema.Replace("'", "''")}', @DropUnknownIndexes = {dropUnknownIndexes}, @UpdateFillFactor = {(template.UpdateFillFactor ? "1" : "0")}, @WhatIf = {whatIfOnly}";
+                var tableDefinitionsXml = SerializeTablesToXml(template.Tables);
+                command.CommandText = $"EXEC [{dbName}].SchemaSmith.TableQuench @ProductName = '{productName}', @TableDefinitions = N'{tableDefinitionsXml.Replace(\"'\", \"''\")}', @DropUnknownIndexes = {dropUnknownIndexes}, @UpdateFillFactor = {(template.UpdateFillFactor ? "1" : "0")}, @WhatIf = {whatIfOnly}";
                 _debugFileLocation = $"SchemaQuench - Quench Tables {dbName}.sql";
                 LogSqlScript(_debugFileLocation, command.CommandText);
                 ExecuteNonQueryAndRethrowInfoMessageError(command);
@@ -143,6 +145,14 @@ public class DatabaseQuencher(string productName, Template template, string dbNa
         var cwd = Path.GetDirectoryName(assembly.Location) ?? @".\";
 
         FileWrapper.GetFromFactory().WriteAllText(Path.Combine(cwd, name), sql);
+    }
+
+    private static string SerializeTablesToXml(List<Table> tables)
+    {
+        var serializer = new XmlSerializer(typeof(List<Table>), new XmlRootAttribute("Tables"));
+        using var stringWriter = new StringWriter();
+        serializer.Serialize(stringWriter, tables);
+        return stringWriter.ToString();
     }
 
     private Exception? _infoMessageException;

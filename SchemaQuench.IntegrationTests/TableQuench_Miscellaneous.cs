@@ -1,6 +1,8 @@
 ﻿using Schema.DataAccess;
 using Microsoft.Data.SqlClient;
 using System;
+using System.Xml.Linq;
+using Newtonsoft.Json;
 
 namespace SchemaQuench.IntegrationTests;
 
@@ -215,7 +217,8 @@ EXEC sp_addextendedproperty @name = N'ProductName', @value = '{productName}', @l
             }
             """;
 
-        cmd.CommandText = $"EXEC SchemaSmith.TableQuench @ProductName = '{productName}', @TableDefinitions = '{json.Replace("'", "''")}', @DropTablesRemovedFromProduct = 1";
+        var xml = JsonConvert.DeserializeXNode($"{\"Table\":{json}}", "Tables")?.ToString(SaveOptions.DisableFormatting) ?? "<Tables />";
+        cmd.CommandText = $"EXEC SchemaSmith.TableQuench @ProductName = '{productName}', @TableDefinitions = N'{xml.Replace("'", "''")}', @DropTablesRemovedFromProduct = 1";
         cmd.ExecuteNonQuery();
 
         cmd.CommandText = "SELECT CAST(CASE WHEN OBJECT_ID('dbo.TableNoLongerInProduct') IS NOT NULL THEN 1 ELSE 0 END AS BIT)";

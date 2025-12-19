@@ -18,6 +18,9 @@ public static class ForgeKindler
         command.CommandText = ResourceLoader.Load("SchemaSmith.fn_SafeBracketWrap.sql");
         command.ExecuteNonQuery();
 
+        command.CommandText = ResourceLoader.Load("SchemaSmith.fn_SplitCsv.sql");
+        command.ExecuteNonQuery();
+
         command.CommandText = ResourceLoader.Load("SchemaSmith.TableQuench.sql");
         command.ExecuteNonQuery();
 
